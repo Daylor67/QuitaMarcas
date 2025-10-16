@@ -1,4 +1,5 @@
 import os
+import sys
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QIcon, QPixmap
@@ -11,6 +12,22 @@ from core.utils.constants import OUTPUT_SUFFIX
 from gui.process import GuiStitchProcess
 
 SCRIPT_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
+
+
+def set_dark_title_bar(window):
+    """Aplica el modo oscuro a la barra de título en Windows 10/11"""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import windll
+            hwnd = int(window.winId())
+            # DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+            # Forzar modo oscuro en la barra de título
+            windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 19, ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int)
+            )
+        except Exception as e:
+            print(f"No se pudo aplicar el modo oscuro a la barra de título: {e}")
 
 
 class ProcessThread(QThread):
@@ -47,6 +64,8 @@ def initialize_gui():
     appVersion = "3.1"
     appAuthor = "MechTechnology"
     MainWindow.setWindowTitle("SmartStitch By {0} [{1}]".format(appAuthor, appVersion))
+    # Aplica modo oscuro a la barra de título
+    set_dark_title_bar(MainWindow)
     # Controls Setup
     on_load()
     bind_signals()
