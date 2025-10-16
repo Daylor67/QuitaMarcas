@@ -1,0 +1,6 @@
+natsort
+pillow
+numpy>=1.26.0
+pyside6
+pyqtdarktheme
+psd-tools

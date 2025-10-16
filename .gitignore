@@ -6,3 +6,5 @@ __logs__/
 __settings__/
 *.pickle
 *.log
+/venv
+/.claude
