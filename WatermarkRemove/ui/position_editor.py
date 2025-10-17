@@ -84,12 +84,15 @@ class PositionEditor(QDialog):
 
         # Datos
         self.images_folder = None
-        self.watermarks_folder = None
+        self.watermarks_folder = None  # Carpeta específica de marcas seleccionada
         self.image_files = []
         self.watermark_files = []
         self.current_image_index = 0
         self.current_image = None
         self.current_watermark = None
+
+        # Ruta base de marcas
+        self.marcas_base_path = Path(os.path.dirname(current_dir)) / 'marcas'
 
         # Posición actual
         self.offset_x = 0
@@ -106,8 +109,9 @@ class PositionEditor(QDialog):
         """Configura la interfaz de usuario con layout horizontal"""
         self.setWindowTitle("Editor de Posiciones de Marca de Agua")
         self.setModal(True)
-        self.resize(1300, 750)
-        self.setMinimumSize(1100, 650)
+
+        # Tamaño inicial - se ajustará automáticamente al cargar imágenes
+        self.resize(800, 650)
 
         # Layout principal HORIZONTAL
         main_layout = QHBoxLayout(self)
@@ -125,7 +129,8 @@ class PositionEditor(QDialog):
     def _create_controls_panel(self) -> QWidget:
         """Crea el panel de controles (izquierda)"""
         panel = QWidget()
-        panel.setFixedWidth(380)
+        self.controls_panel_width = 250  # Guardar para cálculos posteriores
+        panel.setFixedWidth(self.controls_panel_width)
         layout = QVBoxLayout(panel)
         layout.setSpacing(10)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -146,22 +151,20 @@ class PositionEditor(QDialog):
         self.images_label.setWordWrap(True)
         folders_layout.addWidget(self.images_label)
 
-        # Botón carpeta marcas
-        btn_watermarks = QPushButton("📂 Carpeta de Marcas de Agua")
-        btn_watermarks.clicked.connect(self._select_watermarks_folder)
-        btn_watermarks.setStyleSheet("padding: 6px;")
-        folders_layout.addWidget(btn_watermarks)
+        # Selector de carpeta de marcas (desde WatermarkRemove/marcas)
+        folders_layout.addWidget(QLabel("Carpeta de Marcas:"))
+        self.watermark_folder_combo = QComboBox()
+        self.watermark_folder_combo.currentIndexChanged.connect(self._on_watermark_folder_changed)
+        folders_layout.addWidget(self.watermark_folder_combo)
 
-        self.watermarks_label = QLabel("No seleccionada")
-        self.watermarks_label.setStyleSheet("color: #666; font-size: 10px; padding-left: 10px;")
-        self.watermarks_label.setWordWrap(True)
-        folders_layout.addWidget(self.watermarks_label)
-
-        # Selector de marca
-        folders_layout.addWidget(QLabel("Marca actual:"))
+        # Selector de marca individual dentro de la carpeta
+        folders_layout.addWidget(QLabel("Marca específica:"))
         self.watermark_combo = QComboBox()
         self.watermark_combo.currentIndexChanged.connect(self._on_watermark_changed)
         folders_layout.addWidget(self.watermark_combo)
+
+        # Cargar las carpetas de marcas disponibles
+        self._load_watermark_folders()
 
         folders_group.setLayout(folders_layout)
         layout.addWidget(folders_group)
@@ -198,15 +201,7 @@ class PositionEditor(QDialog):
         offset_x_layout.setContentsMargins(0, 0, 0, 0)
         offset_x_layout.setSpacing(5)
 
-        offset_x_layout.addWidget(QLabel("X:"))
-
-        btn_x_minus = QPushButton("◀")
-        btn_x_minus.setFixedSize(30, 30)
-        btn_x_minus.setAutoRepeat(True)  # Incremento automático al mantener
-        btn_x_minus.setAutoRepeatDelay(500)  # Espera antes de repetir
-        btn_x_minus.setAutoRepeatInterval(50)  # Intervalo de repetición
-        btn_x_minus.clicked.connect(lambda: self._adjust_offset('x', -1))
-        offset_x_layout.addWidget(btn_x_minus)
+        offset_x_layout.addWidget(QLabel("Horizontal:\t"))
 
         self.offset_x_spin = QSpinBox()
         self.offset_x_spin.setRange(-9999, 9999)
@@ -214,14 +209,6 @@ class PositionEditor(QDialog):
         self.offset_x_spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.offset_x_spin.valueChanged.connect(lambda v: self._on_offset_spin_changed('x', v))
         offset_x_layout.addWidget(self.offset_x_spin, 1)
-
-        btn_x_plus = QPushButton("▶")
-        btn_x_plus.setFixedSize(30, 30)
-        btn_x_plus.setAutoRepeat(True)
-        btn_x_plus.setAutoRepeatDelay(500)
-        btn_x_plus.setAutoRepeatInterval(50)
-        btn_x_plus.clicked.connect(lambda: self._adjust_offset('x', 1))
-        offset_x_layout.addWidget(btn_x_plus)
 
         position_layout.addWidget(offset_x_container)
 
@@ -231,15 +218,7 @@ class PositionEditor(QDialog):
         offset_y_layout.setContentsMargins(0, 0, 0, 0)
         offset_y_layout.setSpacing(5)
 
-        offset_y_layout.addWidget(QLabel("Y:"))
-
-        btn_y_minus = QPushButton("◀")
-        btn_y_minus.setFixedSize(30, 30)
-        btn_y_minus.setAutoRepeat(True)
-        btn_y_minus.setAutoRepeatDelay(500)
-        btn_y_minus.setAutoRepeatInterval(50)
-        btn_y_minus.clicked.connect(lambda: self._adjust_offset('y', -1))
-        offset_y_layout.addWidget(btn_y_minus)
+        offset_y_layout.addWidget(QLabel("Vertical:\t\t"))
 
         self.offset_y_spin = QSpinBox()
         self.offset_y_spin.setRange(-9999, 9999)
@@ -247,14 +226,6 @@ class PositionEditor(QDialog):
         self.offset_y_spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.offset_y_spin.valueChanged.connect(lambda v: self._on_offset_spin_changed('y', v))
         offset_y_layout.addWidget(self.offset_y_spin, 1)
-
-        btn_y_plus = QPushButton("▶")
-        btn_y_plus.setFixedSize(30, 30)
-        btn_y_plus.setAutoRepeat(True)
-        btn_y_plus.setAutoRepeatDelay(500)
-        btn_y_plus.setAutoRepeatInterval(50)
-        btn_y_plus.clicked.connect(lambda: self._adjust_offset('y', 1))
-        offset_y_layout.addWidget(btn_y_plus)
 
         position_layout.addWidget(offset_y_container)
 
@@ -266,15 +237,6 @@ class PositionEditor(QDialog):
         self.counter_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.counter_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #2196F3; padding: 10px;")
         layout.addWidget(self.counter_label)
-
-        # Instrucciones
-        instructions = QLabel("⌨️ Enter: Guardar\nEsc: Cerrar")
-        instructions.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        instructions.setStyleSheet(
-            "background-color: #092D48; padding: 12px; "
-            "border-radius: 5px; font-size: 11px; font-weight: bold;"
-        )
-        layout.addWidget(instructions)
 
         # Botones
         self.btn_save = QPushButton("💾 Guardar y Siguiente")
@@ -327,7 +289,6 @@ class PositionEditor(QDialog):
         scroll.setStyleSheet("border: 2px solid #444;")
 
         self.image_label = ZoomableImageLabel()
-        self.image_label.setMinimumSize(400, 300)
         scroll.setWidget(self.image_label)
 
         layout.addWidget(scroll, 1)
@@ -376,13 +337,31 @@ class PositionEditor(QDialog):
             self._load_images()
             self._check_ready()
 
-    def _select_watermarks_folder(self):
-        """Abre diálogo para seleccionar carpeta de marcas de agua"""
-        folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta de Marcas de Agua")
-        if folder:
-            self.watermarks_folder = Path(folder)
-            self.watermarks_label.setText(self.watermarks_folder.name)
-            self._load_watermarks()
+    def _load_watermark_folders(self):
+        """Carga las carpetas disponibles en WatermarkRemove/marcas"""
+        self.watermark_folder_combo.clear()
+
+        if not self.marcas_base_path.exists():
+            return
+
+        # Obtener subcarpetas ordenadas (más recientes primero)
+        folders = [f for f in self.marcas_base_path.iterdir() if f.is_dir()]
+        folders.sort(reverse=True)
+
+        # Agregar al combo: label = nombre, data = ruta completa
+        for folder in folders:
+            self.watermark_folder_combo.addItem(folder.name, str(folder))
+
+    def _on_watermark_folder_changed(self, index):
+        """Callback cuando cambia la carpeta de marcas seleccionada"""
+        if index < 0:
+            return
+
+        # Obtener la ruta de la carpeta seleccionada
+        folder_path = self.watermark_folder_combo.currentData()
+        if folder_path:
+            self.watermarks_folder = Path(folder_path)
+            self._load_watermarks_into_combo()
             self._check_ready()
 
     def _load_images(self):
@@ -398,18 +377,20 @@ class PositionEditor(QDialog):
         self.current_image_index = 0
         self._update_counter()
 
-    def _load_watermarks(self):
-        """Carga la lista de marcas de agua"""
+    def _load_watermarks_into_combo(self):
+        """Carga las marcas de agua PNG en el ComboBox desde la carpeta seleccionada"""
+        self.watermark_combo.clear()
+        self.watermark_files = []
+
         if not self.watermarks_folder or not self.watermarks_folder.exists():
             return
 
-        self.watermark_files = []
-        self.watermark_combo.clear()
-
+        # Cargar todos los archivos PNG de la carpeta
         for file in sorted(self.watermarks_folder.iterdir()):
             if file.is_file() and file.suffix.lower() == '.png':
                 self.watermark_files.append(file)
-                self.watermark_combo.addItem(file.name)
+                # Agregar al ComboBox: nombre del archivo como label, ruta como data
+                self.watermark_combo.addItem(file.name, str(file))
 
     def _check_ready(self):
         """Verifica si está listo para editar"""
@@ -420,9 +401,8 @@ class PositionEditor(QDialog):
             len(self.watermark_files) > 0
         )
 
-        self.btn_save.setEnabled(ready)
-
         if ready:
+            self.btn_save.setEnabled(ready)
             self._load_current_image()
             self._load_current_watermark()
             self._update_preview()
@@ -436,15 +416,16 @@ class PositionEditor(QDialog):
         self.current_image = load_images_cv2(str(image_path))
 
     def _load_current_watermark(self):
-        """Carga la marca de agua actual"""
+        """Carga la marca de agua seleccionada en el ComboBox"""
         if not self.watermark_files or self.watermark_combo.currentIndex() < 0:
             return
 
-        watermark_path = self.watermark_files[self.watermark_combo.currentIndex()]
+        watermark_index = self.watermark_combo.currentIndex()
+        watermark_path = self.watermark_files[watermark_index]
         self.current_watermark = load_images_cv2(str(watermark_path))
 
     def _on_watermark_changed(self, index):
-        """Callback cuando cambia la marca"""
+        """Callback cuando cambia la marca individual seleccionada"""
         if index >= 0:
             self._load_current_watermark()
             self._update_preview()
@@ -456,7 +437,7 @@ class PositionEditor(QDialog):
         self._update_preview()
 
     def _update_preview(self):
-        """Actualiza el preview con zoom"""
+        """Actualiza el preview con zoom y ajusta el tamaño de la ventana"""
         if self.current_image is None or self.current_watermark is None:
             return
 
@@ -483,8 +464,40 @@ class PositionEditor(QDialog):
             # Establecer imagen (el label maneja el zoom)
             self.image_label.set_image(pixmap)
 
+            # Ajustar el tamaño de la ventana según la imagen
+            self._adjust_window_size(width, height)
+
         except Exception as e:
             self.image_label.setText(f"❌ Error: {str(e)}")
+
+    def _adjust_window_size(self, image_width: int, image_height: int):
+        """
+        Ajusta el tamaño de la ventana según la imagen actual.
+        - Ancho: Se ajusta al ancho de la imagen
+        - Alto: Fijo basado en el panel de controles
+        """
+        # Calcular el ancho total de la ventana
+        # Panel de controles + spacing + imagen + bordes/padding
+        SPACING = 15  # spacing del main_layout
+        MARGINS = 20  # 10px a cada lado (contentsMargins)
+        SCROLL_BORDER = 4  # Border del scroll area (2px * 2)
+        EXTRA_PADDING = 20  # Padding extra para barras de scroll y espacios
+
+        new_window_width = (
+            self.controls_panel_width +  # Panel de controles fijo
+            SPACING +                     # Espacio entre paneles
+            image_width +                 # Ancho de la imagen
+            SCROLL_BORDER +               # Borde del scroll area
+            MARGINS +                     # Márgenes laterales
+            EXTRA_PADDING                 # Padding extra
+        )
+
+        # El alto se mantiene fijo (basado en el tamaño del panel de controles)
+        # No se usa image_height porque solo queremos ajustar el ancho
+        current_height = self.height()
+
+        # Redimensionar solo el ancho, manteniendo el alto fijo
+        self.resize(new_window_width, current_height)
 
     def _update_counter(self):
         """Actualiza el contador"""
