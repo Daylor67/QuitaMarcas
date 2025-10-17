@@ -6,16 +6,19 @@ import sys
 from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
-    QScrollArea, QGraphicsOpacityEffect
+    QScrollArea, QGraphicsOpacityEffect, QComboBox, QGroupBox
 )
-from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation
-from PySide6.QtGui import QPixmap, QKeyEvent, QWheelEvent
+from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QRect
+from PySide6.QtGui import QPixmap, QKeyEvent, QWheelEvent, QPainter, QPen, QColor
 
 # Agregar el directorio raíz al path
 current_dir = os.path.abspath(os.path.dirname(__file__))
 parent_dir = os.path.dirname(os.path.dirname(current_dir))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
+
+from utils import UtilJson
+import cv2
 
 
 class SlideshowViewer(QDialog):
@@ -34,7 +37,7 @@ class SlideshowViewer(QDialog):
 
     SUPPORTED_FORMATS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.tga', '.psd', '.psb', '.jfif')
 
-    def __init__(self, folder_path: str, parent=None):
+    def __init__(self, folder_path: str, parent=None, watermark_folder: str = None, watermark_name: str = None):
         super().__init__(parent)
         self.folder_path = Path(folder_path) if folder_path else None
         self.image_files = []
@@ -44,8 +47,19 @@ class SlideshowViewer(QDialog):
         self.zoom_level = 100  # Nivel de zoom actual
         self.controls_panel_width = 280  # Ancho del panel de controles para cálculos
 
+        # Información de marca de agua
+        self.watermark_folder = Path(watermark_folder) if watermark_folder else None
+        self.watermark_name = watermark_name
+        self.watermark_positions = {}  # Posiciones cargadas desde JSON
+        self.watermark_files = []  # Archivos PNG de marcas de agua
+
         self._setup_ui()
         self._load_image_list()
+
+        # Cargar marcas de agua y posiciones si se proporcionó la carpeta
+        if self.watermark_folder:
+            self._load_watermark_files()
+            self._load_watermark_positions()
 
         if self.image_files:
             self._show_current_image()
@@ -106,6 +120,32 @@ class SlideshowViewer(QDialog):
         self.filename_label.setWordWrap(True)
         layout.addWidget(self.filename_label)
 
+        # Espaciador
+        layout.addStretch()
+        
+        # Carpetas
+        folders_group = QGroupBox("📁 Selección")
+        folders_layout = QVBoxLayout()
+        folders_layout.setSpacing(6)
+
+        # Selector de carpeta de marcas (desde WatermarkRemove/marcas)
+        folders_layout.addWidget(QLabel("Carpeta de Marcas:"))
+        self.watermark_folder_combo = QComboBox()
+        self.watermark_folder_combo.currentIndexChanged.connect(self._on_watermark_folder_changed)
+        folders_layout.addWidget(self.watermark_folder_combo)
+
+        # Selector de marca individual dentro de la carpeta
+        folders_layout.addWidget(QLabel("Marca específica:"))
+        self.watermark_combo = QComboBox()
+        self.watermark_combo.currentIndexChanged.connect(self._on_watermark_changed)
+        folders_layout.addWidget(self.watermark_combo)
+
+        # Cargar las carpetas de marcas disponibles
+        self._load_watermark_folders()
+
+        folders_group.setLayout(folders_layout)
+        layout.addWidget(folders_group)
+        
         # Espaciador
         layout.addStretch()
 
@@ -201,6 +241,104 @@ class SlideshowViewer(QDialog):
 
         self._update_counter()
 
+    def _load_watermark_folders(self):
+        """Carga las carpetas disponibles en WatermarkRemove/marcas"""
+        self.watermark_folder_combo.clear()
+
+        wm_dir = os.path.dirname(current_dir)
+        marcas_base_path = Path(wm_dir) / 'marcas'
+
+        if not marcas_base_path.exists():
+            return
+
+        # Obtener subcarpetas ordenadas (más recientes primero)
+        folders = [f for f in marcas_base_path.iterdir() if f.is_dir()]
+        folders.sort(reverse=True)
+
+        # Agregar al combo: label = nombre, data = ruta completa
+        for folder in folders:
+            self.watermark_folder_combo.addItem(folder.name, str(folder))
+
+        # Si se proporcionó una carpeta inicial, seleccionarla
+        if self.watermark_folder:
+            index = self.watermark_folder_combo.findText(self.watermark_name)
+            if index >= 0:
+                self.watermark_folder_combo.setCurrentIndex(index)
+
+    def _on_watermark_folder_changed(self, index):
+        """Callback cuando cambia la carpeta de marcas seleccionada"""
+        if index < 0:
+            return
+
+        # Obtener la ruta de la carpeta seleccionada
+        folder_path = self.watermark_folder_combo.currentData()
+        folder_name = self.watermark_folder_combo.currentText()
+        if folder_path:
+            self.watermark_folder = Path(folder_path)
+            self.watermark_name = folder_name  # Actualizar el nombre
+            self._load_watermarks_into_combo()
+            self._load_watermark_positions()
+            # Actualizar la visualización
+            self._show_current_image()
+
+    def _load_watermarks_into_combo(self):
+        """Carga las marcas de agua PNG en el ComboBox desde la carpeta seleccionada"""
+        self.watermark_combo.clear()
+        self.watermark_files = []
+
+        if not self.watermark_folder or not self.watermark_folder.exists():
+            return
+
+        # Cargar todos los archivos PNG de la carpeta
+        for file in sorted(self.watermark_folder.iterdir()):
+            if file.is_file() and file.suffix.lower() == '.png':
+                self.watermark_files.append(file)
+                # Agregar al ComboBox: nombre del archivo como label, ruta como data
+                self.watermark_combo.addItem(file.name, str(file))
+
+    def _on_watermark_changed(self, index):
+        """Callback cuando cambia la marca individual seleccionada"""
+        if index >= 0:
+            # Actualizar la visualización con los nuevos cuadrados
+            self._show_current_image()
+
+    def _load_watermark_files(self):
+        """Carga los archivos PNG de marcas de agua desde la carpeta"""
+        if not self.watermark_folder or not self.watermark_folder.exists():
+            return
+
+        self.watermark_files = []
+        for file in sorted(self.watermark_folder.iterdir()):
+            if file.is_file() and file.suffix.lower() == '.png':
+                self.watermark_files.append(file)
+
+    def _load_watermark_positions(self):
+        """Carga las posiciones de marcas de agua desde wm_positions.json"""
+        if not self.watermark_name:
+            return
+
+        try:
+            wm_dir = os.path.dirname(current_dir)
+            positions_path = Path(wm_dir) / 'wm_positions.json'
+
+            if not positions_path.exists():
+                self.watermark_positions = {}
+                return
+
+            # Cargar posiciones desde JSON
+            positions_file = UtilJson(positions_path)
+            data = positions_file.read()
+
+            # Obtener las posiciones para la marca actual
+            if self.watermark_name in data:
+                self.watermark_positions = data[self.watermark_name]
+            else:
+                self.watermark_positions = {}
+
+        except Exception as e:
+            print(f"Error cargando posiciones de marca de agua: {e}")
+            self.watermark_positions = {}
+
     def _show_current_image(self):
         """Muestra la imagen actual con el zoom aplicado"""
         if not self.image_files or self.current_index >= len(self.image_files):
@@ -233,7 +371,7 @@ class SlideshowViewer(QDialog):
         self.next_btn.setEnabled(self.current_index < len(self.image_files) - 1)
 
     def _apply_zoom(self):
-        """Aplica el nivel de zoom actual a la imagen"""
+        """Aplica el nivel de zoom actual a la imagen y dibuja overlays de marcas"""
         if self.current_pixmap is None or self.current_pixmap.isNull():
             return
 
@@ -248,9 +386,110 @@ class SlideshowViewer(QDialog):
             Qt.TransformationMode.SmoothTransformation
         )
 
+        # Si hay posiciones de marcas de agua, dibujar cuadrados overlay
+        if self.watermark_positions and self.watermark_files:
+            scaled_pixmap = self._draw_watermark_overlays(scaled_pixmap, scale_factor)
+
         self.image_label.setPixmap(scaled_pixmap)
         # Ajustar el tamaño del label para que funcione el scroll
         self.image_label.resize(scaled_pixmap.size())
+
+    def _draw_watermark_overlays(self, pixmap: QPixmap, scale_factor: float) -> QPixmap:
+        """
+        Dibuja cuadrados semi-transparentes sobre el pixmap indicando las posiciones de las marcas de agua.
+
+        Args:
+            pixmap: El pixmap escalado de la imagen
+            scale_factor: Factor de escala actual (zoom_level / 100)
+
+        Returns:
+            QPixmap con los cuadrados dibujados
+        """
+        # Crear una copia del pixmap para dibujar encima
+        result_pixmap = QPixmap(pixmap)
+        painter = QPainter(result_pixmap)
+
+        # Configurar el pincel para dibujar cuadrados semi-transparentes
+        pen = QPen(QColor(255, 0, 0, 200))  # Rojo semi-transparente
+        pen.setWidth(3)
+        painter.setPen(pen)
+
+        # Color de relleno semi-transparente
+        painter.setBrush(QColor(255, 0, 0, 50))
+
+        try:
+            # Obtener el índice de la marca actual en el combo
+            current_watermark_index = self.watermark_combo.currentIndex()
+
+            # Si no hay marca seleccionada o no hay archivos, no dibujar nada
+            if current_watermark_index < 0 or not self.watermark_files:
+                painter.end()
+                return result_pixmap
+
+            # Cargar la marca de agua actual para obtener sus dimensiones
+            watermark_file = self.watermark_files[current_watermark_index]
+            watermark_cv = cv2.imread(str(watermark_file), cv2.IMREAD_UNCHANGED)
+
+            if watermark_cv is None:
+                painter.end()
+                return result_pixmap
+
+            wm_height, wm_width = watermark_cv.shape[:2]
+
+            # Obtener dimensiones de la imagen original
+            img_width = self.current_pixmap.width()
+            img_height = self.current_pixmap.height()
+
+            # Dibujar un cuadrado para cada posición guardada
+            for pos_name, pos_data in self.watermark_positions.items():
+                # Obtener parámetros de posición
+                offset_x = pos_data.get('offset_x', 0)
+                offset_y = pos_data.get('offset_y', 0)
+                side_x = pos_data.get('side_x', 'left')
+                side_y = pos_data.get('side_y', 'top')
+
+                # Calcular coordenadas X según side_x
+                if side_x == 'left':
+                    x = offset_x
+                elif side_x == 'center':
+                    x = (img_width - wm_width) // 2 + offset_x
+                elif side_x == 'right':
+                    x = img_width - wm_width - offset_x
+                else:
+                    x = offset_x
+
+                # Calcular coordenadas Y según side_y
+                if side_y == 'top':
+                    y = offset_y
+                elif side_y == 'center':
+                    y = (img_height - wm_height) // 2 + offset_y
+                elif side_y == 'bottom':
+                    y = img_height - wm_height - offset_y
+                else:
+                    y = offset_y
+
+                # Aplicar el factor de escala para el zoom
+                scaled_x = int(x * scale_factor)
+                scaled_y = int(y * scale_factor)
+                scaled_width = int(wm_width * scale_factor)
+                scaled_height = int(wm_height * scale_factor)
+
+                # Dibujar el rectángulo
+                painter.drawRect(scaled_x, scaled_y, scaled_width, scaled_height)
+
+                # Opcional: Dibujar el nombre de la posición
+                painter.setPen(QPen(QColor(255, 255, 255, 255)))  # Texto blanco
+                painter.drawText(scaled_x + 5, scaled_y + 15, pos_name)
+
+                # Restaurar el pen para el siguiente cuadrado
+                painter.setPen(pen)
+
+        except Exception as e:
+            print(f"Error dibujando overlays: {e}")
+        finally:
+            painter.end()
+
+        return result_pixmap
 
     def _set_zoom(self, new_zoom: int):
         """Establece el nivel de zoom y actualiza la visualización"""
