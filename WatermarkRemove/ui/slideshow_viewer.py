@@ -5,7 +5,8 @@ import os
 import sys
 from pathlib import Path
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
+    QScrollArea, QSlider
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap, QKeyEvent
@@ -39,6 +40,8 @@ class SlideshowViewer(QDialog):
         self.image_files = []
         self.current_index = 0
         self.user_approved = False
+        self.current_pixmap = None  # Pixmap original sin zoom
+        self.zoom_level = 100  # Nivel de zoom actual
 
         self._setup_ui()
         self._load_image_list()
@@ -47,74 +50,153 @@ class SlideshowViewer(QDialog):
             self._show_current_image()
 
     def _setup_ui(self):
-        """Configura la interfaz de usuario"""
-        self.setWindowTitle("Revisión de Imágenes - Presiona Space para continuar")
+        """Configura la interfaz de usuario con layout horizontal"""
+        self.setWindowTitle("Revisión de Imágenes")
         self.setModal(True)  # Bloquea la ventana principal
-        self.resize(1200, 800)
-        self.setMinimumSize(800, 600)
+        self.resize(900, 650)
 
-        # Layout principal
-        main_layout = QVBoxLayout(self)
+        # Layout principal HORIZONTAL
+        main_layout = QHBoxLayout(self)
+        main_layout.setSpacing(15)
         main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(10)
 
-        # Header con información
-        header_layout = QHBoxLayout()
+        # === PANEL IZQUIERDO: Controles (fijo 280px) ===
+        left_panel = self._create_controls_panel()
+        main_layout.addWidget(left_panel)
 
+        # === PANEL DERECHO: Imagen con zoom ===
+        right_panel = self._create_image_panel()
+        main_layout.addWidget(right_panel, 1)  # stretch=1 para que use todo el espacio
+
+    def _create_controls_panel(self) -> QWidget:
+        """Crea el panel de controles (izquierda)"""
+        panel = QWidget()
+        panel.setFixedWidth(280)
+        layout = QVBoxLayout(panel)
+        layout.setSpacing(10)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Información de carpeta
+        info_group = QWidget()
+        info_layout = QVBoxLayout(info_group)
+        info_layout.setSpacing(5)
+
+        info_layout.addWidget(QLabel("📁 Carpeta:"))
         self.folder_label = QLabel()
-        self.folder_label.setStyleSheet("font-weight: bold; font-size: 12px;")
-
-        self.counter_label = QLabel()
-        self.counter_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #2196F3;")
-
-        header_layout.addWidget(QLabel("Carpeta:"))
-        header_layout.addWidget(self.folder_label, 1)
-        header_layout.addWidget(self.counter_label)
-
-        main_layout.addLayout(header_layout)
-
-        # Área de imagen
-        self.image_label = QLabel()
-        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_label.setStyleSheet("background-color: #2b2b2b; border: 2px solid #444;")
-        self.image_label.setMinimumSize(600, 400)
-        main_layout.addWidget(self.image_label, 1)
-
-        # Nombre del archivo actual
-        self.filename_label = QLabel()
-        self.filename_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.filename_label.setStyleSheet("font-size: 14px; color: #666; padding: 5px;")
-        main_layout.addLayout(QHBoxLayout())
-        main_layout.addWidget(self.filename_label)
-
-        # Botones
-        button_layout = QHBoxLayout()
-
-        self.prev_btn = QPushButton("⬅️ Anterior (Backspace)")
-        self.prev_btn.clicked.connect(self._previous_image)
-        self.prev_btn.setStyleSheet("padding: 10px; font-size: 12px;")
-
-        self.next_btn = QPushButton("Siguiente (Space) ➡️")
-        self.next_btn.clicked.connect(self._next_image)
-        self.next_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #4CAF50; color: white;")
-
-        self.finish_btn = QPushButton("✓ Finalizar y Procesar (Enter)")
-        self.finish_btn.clicked.connect(self._finish_review)
-        self.finish_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #2196F3; color: white;")
-
-        self.cancel_btn = QPushButton("✗ Cancelar (Esc)")
-        self.cancel_btn.clicked.connect(self._cancel_review)
-        self.cancel_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #f44336; color: white;")
-
-        button_layout.addWidget(self.prev_btn)
-        button_layout.addWidget(self.next_btn)
-        button_layout.addWidget(self.finish_btn)
-        button_layout.addWidget(self.cancel_btn)
-
-        main_layout.addLayout(button_layout)
+        self.folder_label.setStyleSheet("color: #666; font-size: 10px; padding-left: 10px;")
+        self.folder_label.setWordWrap(True)
+        info_layout.addWidget(self.folder_label)
 
         if self.folder_path:
             self.folder_label.setText(str(self.folder_path))
+
+        layout.addWidget(info_group)
+
+        # Contador de imágenes
+        self.counter_label = QLabel("0 / 0")
+        self.counter_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.counter_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #2196F3; padding: 15px;")
+        layout.addWidget(self.counter_label)
+
+        # Nombre del archivo actual
+        self.filename_label = QLabel("📄 Sin archivo")
+        self.filename_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.filename_label.setStyleSheet("font-size: 12px; color: #888; padding: 10px; background-color: #1e1e1e; border-radius: 5px;")
+        self.filename_label.setWordWrap(True)
+        layout.addWidget(self.filename_label)
+
+        # Controles de zoom
+        zoom_group = QWidget()
+        zoom_layout = QVBoxLayout(zoom_group)
+        zoom_layout.setSpacing(5)
+
+        zoom_layout.addWidget(QLabel("🔍 Zoom:"))
+
+        zoom_slider_layout = QHBoxLayout()
+        self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
+        self.zoom_slider.setMinimum(10)
+        self.zoom_slider.setMaximum(200)
+        self.zoom_slider.setValue(100)
+        self.zoom_slider.valueChanged.connect(self._on_zoom_changed)
+        zoom_slider_layout.addWidget(self.zoom_slider, 1)
+
+        self.zoom_label = QLabel("100%")
+        self.zoom_label.setFixedWidth(50)
+        self.zoom_label.setStyleSheet("font-weight: bold;")
+        zoom_slider_layout.addWidget(self.zoom_label)
+
+        zoom_layout.addLayout(zoom_slider_layout)
+        layout.addWidget(zoom_group)
+
+        # Espaciador
+        layout.addStretch()
+
+        # Botones de navegación
+        nav_layout = QVBoxLayout()
+        nav_layout.setSpacing(8)
+
+        self.prev_btn = QPushButton("⬅️ Anterior")
+        self.prev_btn.clicked.connect(self._previous_image)
+        self.prev_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #555; color: white;")
+        nav_layout.addWidget(self.prev_btn)
+
+        self.next_btn = QPushButton("Siguiente ➡️")
+        self.next_btn.clicked.connect(self._next_image)
+        self.next_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #4CAF50; color: white; font-weight: bold;")
+        nav_layout.addWidget(self.next_btn)
+
+        layout.addLayout(nav_layout)
+
+        # Botones de acción
+        action_layout = QVBoxLayout()
+        action_layout.setSpacing(8)
+
+        self.finish_btn = QPushButton("✓ Finalizar y Procesar")
+        self.finish_btn.clicked.connect(self._finish_review)
+        self.finish_btn.setStyleSheet("padding: 12px; font-size: 12px; background-color: #2196F3; color: white; font-weight: bold;")
+        action_layout.addWidget(self.finish_btn)
+
+        self.cancel_btn = QPushButton("✗ Cancelar")
+        self.cancel_btn.clicked.connect(self._cancel_review)
+        self.cancel_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #f44336; color: white;")
+        action_layout.addWidget(self.cancel_btn)
+
+        layout.addLayout(action_layout)
+
+        # Instrucciones de teclado
+        instructions = QLabel("⌨️ Space: Siguiente\nBackspace: Anterior\nEnter: Finalizar\nEsc: Cancelar")
+        instructions.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        instructions.setStyleSheet(
+            "background-color: #092D48; padding: 10px; "
+            "border-radius: 5px; font-size: 10px; color: #aaa;"
+        )
+        layout.addWidget(instructions)
+
+        return panel
+
+    def _create_image_panel(self) -> QWidget:
+        """Crea el panel de imagen con zoom (derecha)"""
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Área de scroll con imagen
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(False)  # Importante para que funcione el zoom
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setStyleSheet("border: 2px solid #444; background-color: #2b2b2b;")
+
+        self.image_label = QLabel()
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setStyleSheet("background-color: #2b2b2b;")
+        scroll.setWidget(self.image_label)
+
+        layout.addWidget(scroll, 1)
+
+        self.scroll_area = scroll  # Guardar referencia para uso posterior
+        return panel
 
     def _load_image_list(self):
         """Carga la lista de archivos de imagen"""
@@ -133,22 +215,18 @@ class SlideshowViewer(QDialog):
         self._update_counter()
 
     def _show_current_image(self):
-        """Muestra la imagen actual"""
+        """Muestra la imagen actual con el zoom aplicado"""
         if not self.image_files or self.current_index >= len(self.image_files):
             return
 
         current_file = self.image_files[self.current_index]
 
-        # Cargar y mostrar imagen
-        pixmap = QPixmap(str(current_file))
-        if not pixmap.isNull():
-            # Escalar imagen para que quepa en el label manteniendo aspecto
-            scaled_pixmap = pixmap.scaled(
-                self.image_label.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
-            self.image_label.setPixmap(scaled_pixmap)
+        # Cargar imagen original
+        self.current_pixmap = QPixmap(str(current_file))
+
+        if not self.current_pixmap.isNull():
+            # Aplicar zoom
+            self._apply_zoom()
         else:
             self.image_label.setText("Error cargando imagen")
 
@@ -161,6 +239,32 @@ class SlideshowViewer(QDialog):
         # Actualizar estado de botones
         self.prev_btn.setEnabled(self.current_index > 0)
         self.next_btn.setEnabled(self.current_index < len(self.image_files) - 1)
+
+    def _apply_zoom(self):
+        """Aplica el nivel de zoom actual a la imagen"""
+        if self.current_pixmap is None or self.current_pixmap.isNull():
+            return
+
+        # Calcular nuevo tamaño basado en zoom
+        scale_factor = self.zoom_level / 100.0
+        new_size = self.current_pixmap.size() * scale_factor
+
+        # Escalar imagen
+        scaled_pixmap = self.current_pixmap.scaled(
+            new_size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+
+        self.image_label.setPixmap(scaled_pixmap)
+        # Ajustar el tamaño del label para que funcione el scroll
+        self.image_label.resize(scaled_pixmap.size())
+
+    def _on_zoom_changed(self, value: int):
+        """Callback cuando cambia el zoom"""
+        self.zoom_level = value
+        self.zoom_label.setText(f"{value}%")
+        self._apply_zoom()
 
     def _update_counter(self):
         """Actualiza el contador de imágenes"""
@@ -212,12 +316,6 @@ class SlideshowViewer(QDialog):
             self._cancel_review()
         else:
             super().keyPressEvent(event)
-
-    def resizeEvent(self, event):
-        """Actualiza la imagen cuando se redimensiona la ventana"""
-        super().resizeEvent(event)
-        if self.image_files:
-            self._show_current_image()
 
     def get_approved(self) -> bool:
         """Retorna si el usuario aprobó continuar con el proceso"""
