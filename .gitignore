@@ -10,3 +10,4 @@ __settings__/
 /.claude
 /WatermarkRemove/marcas/**
 WatermarkRemove/wm_positions.json
+*_old.py
