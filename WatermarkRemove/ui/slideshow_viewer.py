@@ -6,10 +6,10 @@ import sys
 from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
-    QScrollArea, QSlider
+    QScrollArea, QGraphicsOpacityEffect
 )
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPixmap, QKeyEvent
+from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation
+from PySide6.QtGui import QPixmap, QKeyEvent, QWheelEvent
 
 # Agregar el directorio raíz al path
 current_dir = os.path.abspath(os.path.dirname(__file__))
@@ -100,34 +100,11 @@ class SlideshowViewer(QDialog):
         layout.addWidget(self.counter_label)
 
         # Nombre del archivo actual
-        self.filename_label = QLabel("📄 Sin archivo")
+        self.filename_label = QLabel("Sin archivo")
         self.filename_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.filename_label.setStyleSheet("font-size: 12px; color: #888; padding: 10px; background-color: #1e1e1e; border-radius: 5px;")
         self.filename_label.setWordWrap(True)
         layout.addWidget(self.filename_label)
-
-        # Controles de zoom
-        zoom_group = QWidget()
-        zoom_layout = QVBoxLayout(zoom_group)
-        zoom_layout.setSpacing(5)
-
-        zoom_layout.addWidget(QLabel("🔍 Zoom:"))
-
-        zoom_slider_layout = QHBoxLayout()
-        self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
-        self.zoom_slider.setMinimum(10)
-        self.zoom_slider.setMaximum(200)
-        self.zoom_slider.setValue(100)
-        self.zoom_slider.valueChanged.connect(self._on_zoom_changed)
-        zoom_slider_layout.addWidget(self.zoom_slider, 1)
-
-        self.zoom_label = QLabel("100%")
-        self.zoom_label.setFixedWidth(50)
-        self.zoom_label.setStyleSheet("font-weight: bold;")
-        zoom_slider_layout.addWidget(self.zoom_label)
-
-        zoom_layout.addLayout(zoom_slider_layout)
-        layout.addWidget(zoom_group)
 
         # Espaciador
         layout.addStretch()
@@ -136,12 +113,12 @@ class SlideshowViewer(QDialog):
         nav_layout = QVBoxLayout()
         nav_layout.setSpacing(8)
 
-        self.prev_btn = QPushButton("⬅️ Anterior")
+        self.prev_btn = QPushButton("Anterior")
         self.prev_btn.clicked.connect(self._previous_image)
         self.prev_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #555; color: white;")
         nav_layout.addWidget(self.prev_btn)
 
-        self.next_btn = QPushButton("Siguiente ➡️")
+        self.next_btn = QPushButton("Siguiente")
         self.next_btn.clicked.connect(self._next_image)
         self.next_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #4CAF50; color: white; font-weight: bold;")
         nav_layout.addWidget(self.next_btn)
@@ -152,26 +129,17 @@ class SlideshowViewer(QDialog):
         action_layout = QVBoxLayout()
         action_layout.setSpacing(8)
 
-        self.finish_btn = QPushButton("✓ Finalizar y Procesar")
+        self.finish_btn = QPushButton("Finalizar y Procesar")
         self.finish_btn.clicked.connect(self._finish_review)
         self.finish_btn.setStyleSheet("padding: 12px; font-size: 12px; background-color: #2196F3; color: white; font-weight: bold;")
         action_layout.addWidget(self.finish_btn)
 
-        self.cancel_btn = QPushButton("✗ Cancelar")
+        self.cancel_btn = QPushButton("Cancelar")
         self.cancel_btn.clicked.connect(self._cancel_review)
         self.cancel_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #f44336; color: white;")
         action_layout.addWidget(self.cancel_btn)
 
         layout.addLayout(action_layout)
-
-        # Instrucciones de teclado
-        instructions = QLabel("⌨️ Space: Siguiente\nBackspace: Anterior\nEnter: Finalizar\nEsc: Cancelar")
-        instructions.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        instructions.setStyleSheet(
-            "background-color: #092D48; padding: 10px; "
-            "border-radius: 5px; font-size: 10px; color: #aaa;"
-        )
-        layout.addWidget(instructions)
 
         return panel
 
@@ -193,6 +161,24 @@ class SlideshowViewer(QDialog):
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setStyleSheet("background-color: #2b2b2b;")
         scroll.setWidget(self.image_label)
+
+        # Label flotante de zoom (encima de la imagen)
+        self.zoom_overlay_label = QLabel(scroll)
+        self.zoom_overlay_label.setStyleSheet(
+            "background-color: rgba(0, 0, 0, 180); "
+            "color: white; "
+            "padding: 8px 16px; "
+            "border-radius: 5px; "
+            "font-size: 16px; "
+            "font-weight: bold;"
+        )
+        self.zoom_overlay_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.zoom_overlay_label.hide()  # Oculto por defecto
+
+        # Timer para ocultar el label de zoom
+        self.zoom_hide_timer = QTimer(self)
+        self.zoom_hide_timer.timeout.connect(self._hide_zoom_overlay)
+        self.zoom_hide_timer.setSingleShot(True)
 
         layout.addWidget(scroll, 1)
 
@@ -237,7 +223,7 @@ class SlideshowViewer(QDialog):
             self.image_label.setText("Error cargando imagen")
 
         # Actualizar nombre de archivo
-        self.filename_label.setText(f"📄 {current_file.name}")
+        self.filename_label.setText(f"{current_file.name}")
 
         # Actualizar contador
         self._update_counter()
@@ -266,11 +252,34 @@ class SlideshowViewer(QDialog):
         # Ajustar el tamaño del label para que funcione el scroll
         self.image_label.resize(scaled_pixmap.size())
 
-    def _on_zoom_changed(self, value: int):
-        """Callback cuando cambia el zoom"""
-        self.zoom_level = value
-        self.zoom_label.setText(f"{value}%")
+    def _set_zoom(self, new_zoom: int):
+        """Establece el nivel de zoom y actualiza la visualización"""
+        # Limitar el zoom entre 10% y 200%
+        self.zoom_level = max(10, min(200, new_zoom))
         self._apply_zoom()
+        self._show_zoom_overlay()
+
+    def _show_zoom_overlay(self):
+        """Muestra el label flotante con el zoom actual"""
+        self.zoom_overlay_label.setText(f"🔍 {self.zoom_level}%")
+
+        # Posicionar el label en la esquina superior derecha del scroll area
+        scroll_width = self.scroll_area.width()
+        label_width = 120
+        label_height = 40
+        x = scroll_width - label_width - 20
+        y = 20
+
+        self.zoom_overlay_label.setGeometry(x, y, label_width, label_height)
+        self.zoom_overlay_label.show()
+        self.zoom_overlay_label.raise_()  # Traer al frente
+
+        # Reiniciar el timer para ocultar después de 2 segundos
+        self.zoom_hide_timer.start(2000)
+
+    def _hide_zoom_overlay(self):
+        """Oculta el label flotante de zoom"""
+        self.zoom_overlay_label.hide()
 
     def _adjust_window_size(self, image_width: int, image_height: int):
         """
@@ -337,10 +346,41 @@ class SlideshowViewer(QDialog):
         self.review_completed.emit(False)
         self.reject()
 
+    def wheelEvent(self, event: QWheelEvent):
+        """Maneja el zoom con Ctrl + rueda del mouse"""
+        if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            # Ctrl está presionado - hacer zoom
+            delta = event.angleDelta().y()
+            zoom_change = 10 if delta > 0 else -10
+            new_zoom = self.zoom_level + zoom_change
+            self._set_zoom(new_zoom)
+            event.accept()
+        else:
+            # Sin Ctrl - comportamiento normal de scroll
+            super().wheelEvent(event)
+
     def keyPressEvent(self, event: QKeyEvent):
         """Maneja los eventos de teclado"""
         key = event.key()
 
+        # Teclas de zoom
+        if key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+            # Ctrl + Plus: Zoom in
+            self._set_zoom(self.zoom_level + 10)
+            event.accept()
+            return
+        elif key == Qt.Key.Key_Minus:
+            # Ctrl + Minus: Zoom out
+            self._set_zoom(self.zoom_level - 10)
+            event.accept()
+            return
+        elif key == Qt.Key.Key_0:
+            # Ctrl + 0: Reset zoom
+            self._set_zoom(100)
+            event.accept()
+            return
+
+        # Navegación normal
         if key == Qt.Key.Key_Space:
             self._next_image()
         elif key == Qt.Key.Key_Backspace:
