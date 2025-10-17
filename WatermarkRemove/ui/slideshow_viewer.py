@@ -49,7 +49,7 @@ class SlideshowViewer(QDialog):
 
     SUPPORTED_FORMATS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.tga', '.psd', '.psb', '.jfif')
 
-    def __init__(self, folder_path: str, parent=None, watermark_folder: str = None, watermark_name: str = None):
+    def __init__(self, folder_path: str, parent=None, watermark_folder: str = None, watermark_name: str = None, watermark_tab=None):
         super().__init__(parent)
         self.folder_path = Path(folder_path) if folder_path else None
         self.image_files = []
@@ -58,6 +58,9 @@ class SlideshowViewer(QDialog):
         self.current_pixmap = None  # Pixmap original sin zoom
         self.zoom_level = 100  # Nivel de zoom actual
         self.controls_panel_width = 280  # Ancho del panel de controles para cálculos
+
+        # Referencia al watermark_tab para logging
+        self.watermark_tab = watermark_tab
 
         # Información de marca de agua
         self.watermark_folder = Path(watermark_folder) if watermark_folder else None
@@ -85,6 +88,16 @@ class SlideshowViewer(QDialog):
 
         if self.image_files:
             self._show_current_image()
+
+    def _log(self, message: str):
+        """
+        Registra un mensaje en la consola de proceso del watermark_tab.
+        Si no hay watermark_tab disponible, usa print como fallback.
+        """
+        if self.watermark_tab and hasattr(self.watermark_tab, 'log'):
+            self.watermark_tab.log(message)
+        else:
+            print(message)
 
     def _setup_ui(self):
         """Configura la interfaz de usuario con layout horizontal"""
@@ -375,7 +388,7 @@ class SlideshowViewer(QDialog):
                 self.watermark_positions = {}
 
         except Exception as e:
-            print(f"Error cargando posiciones de marca de agua: {e}")
+            self._log(f"⚠️ Error cargando posiciones de marca de agua: {e}")
             self.watermark_positions = {}
 
     def _show_current_image(self):
@@ -544,7 +557,7 @@ class SlideshowViewer(QDialog):
                 painter.drawText(scaled_x + 5, scaled_y + 15, pos_name)
 
         except Exception as e:
-            print(f"Error dibujando overlays: {e}")
+            self._log(f"⚠️ Error dibujando overlays: {e}")
         finally:
             painter.end()
 
@@ -668,14 +681,14 @@ class SlideshowViewer(QDialog):
                     self.processed_positions[self.current_index].clear()
 
             if image is None:
-                print(f"Error cargando imagen: {current_file}")
+                self._log(f"❌ Error cargando imagen: {current_file.name}")
                 return
 
             # Cargar la marca de agua
             watermark_file = self.watermark_files[current_watermark_index]
             watermark = load_images_cv2(watermark_file)
             if watermark is None:
-                print(f"Error cargando marca de agua: {watermark_file}")
+                self._log(f"❌ Error cargando marca de agua: {watermark_file.name}")
                 return
 
             # Calcular coordenadas usando align_watermark
@@ -705,14 +718,14 @@ class SlideshowViewer(QDialog):
             # Actualizar la visualización para mostrar el cuadrado verde
             self._show_current_image()
 
-            print(f"Marca de agua removida: {pos_name} en {current_file.name}")
+            self._log(f"✅ Marca de agua removida: {pos_name} en {current_file.name}")
 
             # Solo avanzar automáticamente si es click izquierdo (no acumulativo)
             if not is_cumulative:
                 self._next_image()
 
         except Exception as e:
-            print(f"Error procesando marca de agua: {e}")
+            self._log(f"❌ Error procesando marca de agua: {e}")
 
     def _finish_review(self):
         """Finaliza la revisión y permite continuar con el proceso"""

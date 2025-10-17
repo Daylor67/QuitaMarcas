@@ -309,7 +309,7 @@ def launch_process_async():
         # Mostrar visor de imágenes ANTES de procesar (sin pre-selección de marca)
         # El usuario seleccionará la marca de agua dentro del slideshow
         update_process_progress(0, "Abriendo visor de imágenes para revisión...")
-        viewer = SlideshowViewer(input_path, MainWindow)
+        viewer = SlideshowViewer(input_path, MainWindow, watermark_tab=watermark_tab)
 
         # Ejecutar visor de forma modal (bloquea hasta que el usuario termine)
         viewer.exec()
