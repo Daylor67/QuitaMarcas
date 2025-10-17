@@ -42,6 +42,7 @@ class SlideshowViewer(QDialog):
         self.user_approved = False
         self.current_pixmap = None  # Pixmap original sin zoom
         self.zoom_level = 100  # Nivel de zoom actual
+        self.controls_panel_width = 280  # Ancho del panel de controles para cálculos
 
         self._setup_ui()
         self._load_image_list()
@@ -71,7 +72,7 @@ class SlideshowViewer(QDialog):
     def _create_controls_panel(self) -> QWidget:
         """Crea el panel de controles (izquierda)"""
         panel = QWidget()
-        panel.setFixedWidth(280)
+        panel.setFixedWidth(self.controls_panel_width)
         layout = QVBoxLayout(panel)
         layout.setSpacing(10)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -227,6 +228,11 @@ class SlideshowViewer(QDialog):
         if not self.current_pixmap.isNull():
             # Aplicar zoom
             self._apply_zoom()
+
+            # Ajustar el tamaño de la ventana según la imagen
+            width = self.current_pixmap.width()
+            height = self.current_pixmap.height()
+            self._adjust_window_size(width, height)
         else:
             self.image_label.setText("Error cargando imagen")
 
@@ -265,6 +271,35 @@ class SlideshowViewer(QDialog):
         self.zoom_level = value
         self.zoom_label.setText(f"{value}%")
         self._apply_zoom()
+
+    def _adjust_window_size(self, image_width: int, image_height: int):
+        """
+        Ajusta el tamaño de la ventana según la imagen actual.
+        - Ancho: Se ajusta al ancho de la imagen
+        - Alto: Fijo basado en el panel de controles
+        """
+        # Calcular el ancho total de la ventana
+        # Panel de controles + spacing + imagen + bordes/padding
+        SPACING = 15  # spacing del main_layout
+        MARGINS = 20  # 10px a cada lado (contentsMargins)
+        SCROLL_BORDER = 4  # Border del scroll area (2px * 2)
+        EXTRA_PADDING = 20  # Padding extra para barras de scroll y espacios
+
+        new_window_width = (
+            self.controls_panel_width +  # Panel de controles fijo
+            SPACING +                     # Espacio entre paneles
+            image_width +                 # Ancho de la imagen
+            SCROLL_BORDER +               # Borde del scroll area
+            MARGINS +                     # Márgenes laterales
+            EXTRA_PADDING                 # Padding extra
+        )
+
+        # El alto se mantiene fijo (basado en el tamaño del panel de controles)
+        # No se usa image_height porque solo queremos ajustar el ancho
+        current_height = self.height()
+
+        # Redimensionar solo el ancho, manteniendo el alto fijo
+        self.resize(new_window_width, current_height)
 
     def _update_counter(self):
         """Actualiza el contador de imágenes"""
