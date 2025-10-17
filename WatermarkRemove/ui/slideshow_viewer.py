@@ -638,7 +638,15 @@ class SlideshowViewer(QDialog):
                 return
 
             # Cargar la imagen con OpenCV
-            image = cv2.imread(str(current_file))
+            # Si ya existe una imagen procesada en output, cargarla para aplicar más marcas
+            output_path = self.output_folder / current_file.name
+            if output_path.exists():
+                # Usar la imagen ya procesada como base
+                image = cv2.imread(str(output_path))
+            else:
+                # Primera vez procesando esta imagen, usar la original
+                image = cv2.imread(str(current_file))
+
             if image is None:
                 print(f"Error cargando imagen: {current_file}")
                 return
