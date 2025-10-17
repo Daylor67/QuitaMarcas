@@ -8,3 +8,5 @@ __settings__/
 *.log
 /venv
 /.claude
+/WatermarkRemove/marcas/**
+WatermarkRemove/wm_positions.json
