@@ -10,7 +10,7 @@ from assets.SmartStitchLogo import icon
 from core.services import SettingsHandler
 from core.utils.constants import OUTPUT_SUFFIX
 from gui.process import GuiStitchProcess
-from WatermarkRemove.ui import WatermarkTab
+from WatermarkRemove.ui import WatermarkTab, SlideshowViewer
 
 SCRIPT_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 
@@ -64,7 +64,7 @@ def initialize_gui():
     # Sets Window Title
     appVersion = "3.1"
     appAuthor = "MechTechnology"
-    wmr_version = 4
+    wmr_version = '3.0'
     title_wmr = f'WmRemove By Daylor [{wmr_version}]'
     MainWindow.setWindowTitle(f"SmartStitch By {appAuthor} [{appVersion}] + {title_wmr}")
     # Aplica modo oscuro a la barra de título
@@ -289,5 +289,32 @@ def update_postprocess_console(message: str):
 
 
 def launch_process_async():
+    """Lanza el proceso de stitching, mostrando primero el visor de imágenes"""
     MainWindow.processConsoleField.clear()
+
+    # Obtener la ruta de input
+    input_path = MainWindow.inputField.text()
+
+    if not input_path:
+        update_process_progress(0, "Error: No se ha seleccionado ninguna carpeta")
+        return
+
+    if not os.path.exists(input_path):
+        update_process_progress(0, f"Error: La ruta no existe: {input_path}")
+        return
+
+    # Mostrar visor de imágenes ANTES de procesar
+    update_process_progress(0, "Abriendo visor de imágenes para revisión...")
+    viewer = SlideshowViewer(input_path, MainWindow)
+
+    # Ejecutar visor de forma modal (bloquea hasta que el usuario termine)
+    viewer.exec()
+
+    # Si el usuario canceló (presionó ESC o cerró la ventana), no continuar
+    if not viewer.get_approved():
+        update_process_progress(0, "Proceso cancelado por el usuario")
+        return
+
+    # Si llegó aquí, el usuario aprobó -> iniciar proceso
+    update_process_progress(0, "Iniciando procesamiento...")
     processThread.start()
