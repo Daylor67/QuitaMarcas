@@ -325,6 +325,13 @@ def launch_process_async():
         if not viewer.get_approved():
             update_process_progress(0, "Proceso cancelado por el usuario")
             return
+
+        # Si se procesaron imágenes, actualizar el inputField para usar la carpeta de salida
+        if viewer.has_processed_images():
+            output_folder = viewer.get_output_folder()
+            if output_folder and output_folder.exists():
+                MainWindow.inputField.setText(str(output_folder))
+                update_process_progress(0, f"Ruta actualizada a: {output_folder}")
     else:
         # Si el checkbox no está activado, no mostrar slideshow viewer
         update_process_progress(0, "Iniciando procesamiento directamente (sin revisión de marcas)...")
