@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QGraphicsOpacityEffect, QComboBox, QGroupBox
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QRect
-from PySide6.QtGui import QPixmap, QKeyEvent, QWheelEvent, QPainter, QPen, QColor
+from PySide6.QtGui import QPixmap, QKeyEvent, QWheelEvent, QPainter, QPen, QColor, QMouseEvent, QImage
 
 # Agregar el directorio raíz al path
 current_dir = os.path.abspath(os.path.dirname(__file__))
@@ -19,6 +19,8 @@ if parent_dir not in sys.path:
 
 from utils import UtilJson
 import cv2
+import numpy as np
+from WatermarkRemove import align_watermark, remove_watermark
 
 
 class SlideshowViewer(QDialog):
@@ -53,8 +55,17 @@ class SlideshowViewer(QDialog):
         self.watermark_positions = {}  # Posiciones cargadas desde JSON
         self.watermark_files = []  # Archivos PNG de marcas de agua
 
+        # Procesamiento de marcas de agua
+        self.output_folder = None  # Carpeta donde se guardarán las imágenes procesadas
+        self.processed_images = set()  # Set de índices de imágenes ya procesadas
+        self.watermark_rectangles = {}  # Diccionario: pos_name -> QRect (para detección de clicks)
+
         self._setup_ui()
         self._load_image_list()
+
+        # Crear carpeta de salida si se proporcionó watermark
+        if self.watermark_folder and self.folder_path:
+            self._create_output_folder()
 
         # Cargar marcas de agua y posiciones si se proporcionó la carpeta
         if self.watermark_folder:
@@ -224,6 +235,18 @@ class SlideshowViewer(QDialog):
 
         self.scroll_area = scroll  # Guardar referencia para uso posterior
         return panel
+
+    def _create_output_folder(self):
+        """Crea la carpeta de salida para las imágenes procesadas"""
+        if not self.folder_path:
+            return
+
+        # Nombre de la carpeta: "{nombre_original} [sin marca]"
+        folder_name = self.folder_path.name + " [sin marca]"
+        self.output_folder = self.folder_path.parent / folder_name
+
+        # Crear la carpeta si no existe
+        self.output_folder.mkdir(exist_ok=True)
 
     def _load_image_list(self):
         """Carga la lista de archivos de imagen"""
@@ -409,13 +432,23 @@ class SlideshowViewer(QDialog):
         result_pixmap = QPixmap(pixmap)
         painter = QPainter(result_pixmap)
 
-        # Configurar el pincel para dibujar cuadrados semi-transparentes
-        pen = QPen(QColor(255, 0, 0, 200))  # Rojo semi-transparente
+        # Limpiar el diccionario de rectángulos para la nueva imagen
+        self.watermark_rectangles = {}
+
+        # Determinar color según si la imagen ya fue procesada
+        if self.current_index in self.processed_images:
+            # Verde si ya fue procesada
+            pen_color = QColor(0, 255, 0, 200)
+            brush_color = QColor(0, 255, 0, 50)
+        else:
+            # Rojo si aún no se procesó
+            pen_color = QColor(255, 0, 0, 200)
+            brush_color = QColor(255, 0, 0, 50)
+
+        pen = QPen(pen_color)
         pen.setWidth(3)
         painter.setPen(pen)
-
-        # Color de relleno semi-transparente
-        painter.setBrush(QColor(255, 0, 0, 50))
+        painter.setBrush(brush_color)
 
         try:
             # Obtener el índice de la marca actual en el combo
@@ -473,6 +506,16 @@ class SlideshowViewer(QDialog):
                 scaled_y = int(y * scale_factor)
                 scaled_width = int(wm_width * scale_factor)
                 scaled_height = int(wm_height * scale_factor)
+
+                # Guardar el rectángulo para detección de clicks (sin escala, coordenadas originales)
+                self.watermark_rectangles[pos_name] = {
+                    'rect': QRect(x, y, wm_width, wm_height),
+                    'scaled_rect': QRect(scaled_x, scaled_y, scaled_width, scaled_height),
+                    'offset_x': offset_x,
+                    'offset_y': offset_y,
+                    'side_x': side_x,
+                    'side_y': side_y
+                }
 
                 # Dibujar el rectángulo
                 painter.drawRect(scaled_x, scaled_y, scaled_width, scaled_height)
@@ -573,6 +616,67 @@ class SlideshowViewer(QDialog):
             self.current_index -= 1
             self._show_current_image()
 
+    def _process_watermark_at_position(self, pos_name: str, rect_data: dict):
+        """
+        Procesa la marca de agua en la posición especificada.
+
+        Args:
+            pos_name: Nombre de la posición (ej: "pos_1")
+            rect_data: Diccionario con información del rectángulo y posición
+        """
+        if not self.output_folder or not self.image_files:
+            return
+
+        try:
+            # Obtener el archivo de imagen actual
+            current_file = self.image_files[self.current_index]
+
+            # Obtener el índice de la marca actual
+            current_watermark_index = self.watermark_combo.currentIndex()
+            if current_watermark_index < 0 or not self.watermark_files:
+                return
+
+            # Cargar la imagen con OpenCV
+            image = cv2.imread(str(current_file))
+            if image is None:
+                print(f"Error cargando imagen: {current_file}")
+                return
+
+            # Cargar la marca de agua
+            watermark_file = self.watermark_files[current_watermark_index]
+            watermark = cv2.imread(str(watermark_file), cv2.IMREAD_UNCHANGED)
+            if watermark is None:
+                print(f"Error cargando marca de agua: {watermark_file}")
+                return
+
+            # Calcular coordenadas usando align_watermark
+            x, y = align_watermark(
+                image,
+                watermark,
+                offset_x=rect_data['offset_x'],
+                offset_y=rect_data['offset_y'],
+                side_x=rect_data['side_x'],
+                side_y=rect_data['side_y']
+            )
+
+            # Aplicar remove_watermark
+            result_image = remove_watermark(image, watermark, x, y)
+
+            # Guardar la imagen procesada en la carpeta de salida
+            output_path = self.output_folder / current_file.name
+            cv2.imwrite(str(output_path), result_image)
+
+            # Marcar esta imagen como procesada
+            self.processed_images.add(self.current_index)
+
+            # Actualizar la visualización para mostrar el cuadrado verde
+            self._show_current_image()
+
+            print(f"Marca de agua removida: {pos_name} en {current_file.name}")
+
+        except Exception as e:
+            print(f"Error procesando marca de agua: {e}")
+
     def _finish_review(self):
         """Finaliza la revisión y permite continuar con el proceso"""
         self.user_approved = True
@@ -584,6 +688,40 @@ class SlideshowViewer(QDialog):
         self.user_approved = False
         self.review_completed.emit(False)
         self.reject()
+
+    def mousePressEvent(self, event: QMouseEvent):
+        """Maneja clicks en la imagen para procesar marcas de agua"""
+        # Solo procesar clicks izquierdos
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
+
+        # Si no hay watermark folder, comportamiento normal
+        if not self.watermark_folder or not self.watermark_rectangles:
+            super().mousePressEvent(event)
+            return
+
+        # Obtener posición del click relativo al scroll area
+        click_pos = event.pos()
+
+        # Convertir a coordenadas de la imagen (considerando el scroll)
+        scroll_pos = self.scroll_area.mapFrom(self, click_pos)
+        viewport_pos = self.scroll_area.viewport().mapFrom(self.scroll_area, scroll_pos)
+
+        # Ajustar por el scroll offset
+        image_x = viewport_pos.x() + self.scroll_area.horizontalScrollBar().value()
+        image_y = viewport_pos.y() + self.scroll_area.verticalScrollBar().value()
+
+        # Verificar si el click está dentro de algún rectángulo
+        for pos_name, rect_data in self.watermark_rectangles.items():
+            scaled_rect = rect_data['scaled_rect']
+            if scaled_rect.contains(image_x, image_y):
+                # Click detectado en un cuadrado
+                self._process_watermark_at_position(pos_name, rect_data)
+                event.accept()
+                return
+
+        super().mousePressEvent(event)
 
     def wheelEvent(self, event: QWheelEvent):
         """Maneja el zoom con Ctrl + rueda del mouse"""
@@ -634,6 +772,14 @@ class SlideshowViewer(QDialog):
     def get_approved(self) -> bool:
         """Retorna si el usuario aprobó continuar con el proceso"""
         return self.user_approved
+
+    def get_output_folder(self) -> Path:
+        """Retorna la carpeta de salida donde se guardaron las imágenes procesadas"""
+        return self.output_folder
+
+    def has_processed_images(self) -> bool:
+        """Retorna True si se procesó al menos una imagen"""
+        return len(self.processed_images) > 0
 
 
 # Para pruebas independientes
