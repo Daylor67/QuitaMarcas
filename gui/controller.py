@@ -10,6 +10,7 @@ from assets.SmartStitchLogo import icon
 from core.services import SettingsHandler
 from core.utils.constants import OUTPUT_SUFFIX
 from gui.process import GuiStitchProcess
+from WatermarkRemove.ui import WatermarkTab
 
 SCRIPT_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
 
@@ -63,9 +64,14 @@ def initialize_gui():
     # Sets Window Title
     appVersion = "3.1"
     appAuthor = "MechTechnology"
-    MainWindow.setWindowTitle("SmartStitch By {0} [{1}]".format(appAuthor, appVersion))
+    wmr_version = 4
+    title_wmr = f'WmRemove By Daylor [{wmr_version}]'
+    MainWindow.setWindowTitle(f"SmartStitch By {appAuthor} [{appVersion}] + {title_wmr}")
     # Aplica modo oscuro a la barra de título
     set_dark_title_bar(MainWindow)
+    # Agregar pestaña de Watermark Remover (programáticamente)
+    watermark_tab = WatermarkTab()
+    MainWindow.mainTabWidget.addTab(watermark_tab, "Quita Marcas")
     # Controls Setup
     on_load()
     bind_signals()
