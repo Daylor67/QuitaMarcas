@@ -18,9 +18,9 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 from utils import UtilJson
-import cv2
 import numpy as np
 from WatermarkRemove import align_watermark, remove_watermark
+from WatermarkRemove.wm_remove import load_images_cv2, guardar
 
 
 class SlideshowViewer(QDialog):
@@ -464,7 +464,7 @@ class SlideshowViewer(QDialog):
 
             # Cargar la marca de agua actual para obtener sus dimensiones
             watermark_file = self.watermark_files[current_watermark_index]
-            watermark_cv = cv2.imread(str(watermark_file), cv2.IMREAD_UNCHANGED)
+            watermark_cv = load_images_cv2(watermark_file)
 
             if watermark_cv is None:
                 painter.end()
@@ -653,15 +653,15 @@ class SlideshowViewer(QDialog):
             if current_watermark_index < 0 or not self.watermark_files:
                 return
 
-            # Cargar la imagen con OpenCV
+            # Cargar la imagen con OpenCV (soporte Unicode)
             output_path = self.output_folder / current_file.name
 
             if is_cumulative and output_path.exists():
                 # Click derecho: cargar imagen ya procesada para aplicar más marcas
-                image = cv2.imread(str(output_path))
+                image = load_images_cv2(output_path)
             else:
                 # Click izquierdo O primera vez: usar imagen original
-                image = cv2.imread(str(current_file))
+                image = load_images_cv2(current_file)
                 # Si es click izquierdo, limpiar posiciones procesadas anteriormente
                 if not is_cumulative and self.current_index in self.processed_positions:
                     self.processed_positions[self.current_index].clear()
@@ -672,7 +672,7 @@ class SlideshowViewer(QDialog):
 
             # Cargar la marca de agua
             watermark_file = self.watermark_files[current_watermark_index]
-            watermark = cv2.imread(str(watermark_file), cv2.IMREAD_UNCHANGED)
+            watermark = load_images_cv2(watermark_file)
             if watermark is None:
                 print(f"Error cargando marca de agua: {watermark_file}")
                 return
@@ -690,8 +690,8 @@ class SlideshowViewer(QDialog):
             # Aplicar remove_watermark
             result_image = remove_watermark(image, watermark, x, y)
 
-            # Guardar la imagen procesada en la carpeta de salida
-            cv2.imwrite(str(output_path), result_image)
+            # Guardar la imagen procesada en la carpeta de salida (soporte Unicode)
+            guardar(current_file, result_image, self.output_folder)
 
             # Marcar esta imagen como procesada
             self.processed_images.add(self.current_index)
