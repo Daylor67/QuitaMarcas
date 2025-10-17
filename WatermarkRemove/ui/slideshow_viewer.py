@@ -58,6 +58,7 @@ class SlideshowViewer(QDialog):
         # Procesamiento de marcas de agua
         self.output_folder = None  # Carpeta donde se guardarán las imágenes procesadas
         self.processed_images = set()  # Set de índices de imágenes ya procesadas
+        self.processed_positions = {}  # Diccionario: {image_index: set(pos_names)} - posiciones procesadas por imagen
         self.watermark_rectangles = {}  # Diccionario: pos_name -> QRect (para detección de clicks)
 
         self._setup_ui()
@@ -435,20 +436,8 @@ class SlideshowViewer(QDialog):
         # Limpiar el diccionario de rectángulos para la nueva imagen
         self.watermark_rectangles = {}
 
-        # Determinar color según si la imagen ya fue procesada
-        if self.current_index in self.processed_images:
-            # Verde si ya fue procesada
-            pen_color = QColor(0, 255, 0, 200)
-            brush_color = QColor(0, 255, 0, 50)
-        else:
-            # Rojo si aún no se procesó
-            pen_color = QColor(255, 0, 0, 200)
-            brush_color = QColor(255, 0, 0, 50)
-
-        pen = QPen(pen_color)
-        pen.setWidth(3)
-        painter.setPen(pen)
-        painter.setBrush(brush_color)
+        # Obtener posiciones ya procesadas para esta imagen
+        processed_positions_set = self.processed_positions.get(self.current_index, set())
 
         try:
             # Obtener el índice de la marca actual en el combo
@@ -517,15 +506,27 @@ class SlideshowViewer(QDialog):
                     'side_y': side_y
                 }
 
+                # Determinar color según si esta posición específica ya fue procesada
+                if pos_name in processed_positions_set:
+                    # Verde si ya fue procesada
+                    pen_color = QColor(0, 255, 0, 200)
+                    brush_color = QColor(0, 255, 0, 50)
+                else:
+                    # Rojo si aún no se procesó
+                    pen_color = QColor(255, 0, 0, 200)
+                    brush_color = QColor(255, 0, 0, 50)
+
+                pen = QPen(pen_color)
+                pen.setWidth(3)
+                painter.setPen(pen)
+                painter.setBrush(brush_color)
+
                 # Dibujar el rectángulo
                 painter.drawRect(scaled_x, scaled_y, scaled_width, scaled_height)
 
                 # Opcional: Dibujar el nombre de la posición
                 painter.setPen(QPen(QColor(255, 255, 255, 255)))  # Texto blanco
                 painter.drawText(scaled_x + 5, scaled_y + 15, pos_name)
-
-                # Restaurar el pen para el siguiente cuadrado
-                painter.setPen(pen)
 
         except Exception as e:
             print(f"Error dibujando overlays: {e}")
@@ -669,10 +670,18 @@ class SlideshowViewer(QDialog):
             # Marcar esta imagen como procesada
             self.processed_images.add(self.current_index)
 
+            # Marcar esta posición específica como procesada para esta imagen
+            if self.current_index not in self.processed_positions:
+                self.processed_positions[self.current_index] = set()
+            self.processed_positions[self.current_index].add(pos_name)
+
             # Actualizar la visualización para mostrar el cuadrado verde
             self._show_current_image()
 
             print(f"Marca de agua removida: {pos_name} en {current_file.name}")
+
+            # Avanzar automáticamente a la siguiente imagen
+            self._next_image()
 
         except Exception as e:
             print(f"Error procesando marca de agua: {e}")
