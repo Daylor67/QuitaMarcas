@@ -25,13 +25,22 @@ from WatermarkRemove import align_watermark, remove_watermark
 
 class SlideshowViewer(QDialog):
     """
-    Visor de imágenes estilo slideshow con navegación por teclado
+    Visor de imágenes estilo slideshow con navegación por teclado y procesamiento de marcas de agua
 
-    Controles:
+    Controles de navegación:
         - Space: Siguiente imagen
         - Backspace: Imagen anterior
         - Enter: Finalizar revisión
         - Escape: Cancelar proceso
+
+    Controles de zoom:
+        - Ctrl + Rueda: Zoom in/out
+        - Ctrl + Plus/Minus: Zoom in/out
+        - Ctrl + 0: Reset zoom al 100%
+
+    Procesamiento de marcas de agua:
+        - Click Izquierdo: Reemplaza procesamiento (solo un cuadro verde), avanza automáticamente
+        - Click Derecho: Procesamiento acumulativo (múltiples cuadros verdes), NO avanza
     """
 
     # Señal que se emite cuando el usuario finaliza la revisión
@@ -617,13 +626,15 @@ class SlideshowViewer(QDialog):
             self.current_index -= 1
             self._show_current_image()
 
-    def _process_watermark_at_position(self, pos_name: str, rect_data: dict):
+    def _process_watermark_at_position(self, pos_name: str, rect_data: dict, is_cumulative: bool = False):
         """
         Procesa la marca de agua en la posición especificada.
 
         Args:
             pos_name: Nombre de la posición (ej: "pos_1")
             rect_data: Diccionario con información del rectángulo y posición
+            is_cumulative: Si es True (click derecho), aplica acumulativamente.
+                          Si es False (click izquierdo), reemplaza cualquier procesamiento anterior.
         """
         if not self.output_folder or not self.image_files:
             return
@@ -638,14 +649,17 @@ class SlideshowViewer(QDialog):
                 return
 
             # Cargar la imagen con OpenCV
-            # Si ya existe una imagen procesada en output, cargarla para aplicar más marcas
             output_path = self.output_folder / current_file.name
-            if output_path.exists():
-                # Usar la imagen ya procesada como base
+
+            if is_cumulative and output_path.exists():
+                # Click derecho: cargar imagen ya procesada para aplicar más marcas
                 image = cv2.imread(str(output_path))
             else:
-                # Primera vez procesando esta imagen, usar la original
+                # Click izquierdo O primera vez: usar imagen original
                 image = cv2.imread(str(current_file))
+                # Si es click izquierdo, limpiar posiciones procesadas anteriormente
+                if not is_cumulative and self.current_index in self.processed_positions:
+                    self.processed_positions[self.current_index].clear()
 
             if image is None:
                 print(f"Error cargando imagen: {current_file}")
@@ -672,7 +686,6 @@ class SlideshowViewer(QDialog):
             result_image = remove_watermark(image, watermark, x, y)
 
             # Guardar la imagen procesada en la carpeta de salida
-            output_path = self.output_folder / current_file.name
             cv2.imwrite(str(output_path), result_image)
 
             # Marcar esta imagen como procesada
@@ -688,8 +701,9 @@ class SlideshowViewer(QDialog):
 
             print(f"Marca de agua removida: {pos_name} en {current_file.name}")
 
-            # Avanzar automáticamente a la siguiente imagen
-            self._next_image()
+            # Solo avanzar automáticamente si es click izquierdo (no acumulativo)
+            if not is_cumulative:
+                self._next_image()
 
         except Exception as e:
             print(f"Error procesando marca de agua: {e}")
@@ -707,9 +721,14 @@ class SlideshowViewer(QDialog):
         self.reject()
 
     def mousePressEvent(self, event: QMouseEvent):
-        """Maneja clicks en la imagen para procesar marcas de agua"""
-        # Solo procesar clicks izquierdos
-        if event.button() != Qt.MouseButton.LeftButton:
+        """
+        Maneja clicks en la imagen para procesar marcas de agua.
+
+        Click Izquierdo: Reemplaza cualquier procesamiento anterior (solo un cuadro verde) y avanza automáticamente
+        Click Derecho: Procesamiento acumulativo (múltiples cuadros verdes) sin avanzar
+        """
+        # Solo procesar clicks izquierdos o derechos
+        if event.button() not in (Qt.MouseButton.LeftButton, Qt.MouseButton.RightButton):
             super().mousePressEvent(event)
             return
 
@@ -733,8 +752,11 @@ class SlideshowViewer(QDialog):
         for pos_name, rect_data in self.watermark_rectangles.items():
             scaled_rect = rect_data['scaled_rect']
             if scaled_rect.contains(image_x, image_y):
+                # Determinar si es acumulativo según el botón
+                is_cumulative = (event.button() == Qt.MouseButton.RightButton)
+
                 # Click detectado en un cuadrado
-                self._process_watermark_at_position(pos_name, rect_data)
+                self._process_watermark_at_position(pos_name, rect_data, is_cumulative)
                 event.accept()
                 return
 
