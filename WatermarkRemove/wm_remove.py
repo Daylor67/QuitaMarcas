@@ -44,15 +44,18 @@ def load_images_cv2(image_path: Union[str, Path]) -> np.ndarray:
 
 
 def align_watermark(
-    image: np.ndarray, 
-    watermark: np.ndarray, 
-    offset_x: int=0, 
-    offset_y: int=0, 
+    image: np.ndarray,
+    watermark: np.ndarray,
+    offset_x: int=0,
+    offset_y: int=0,
     side_x: str=Literal['left', 'center', 'right'],
     side_y: str=Literal['top', 'center', 'bottom']
 ):
     """
     Alinea la marca de agua en la imagen con un offset dado.
+
+    Ahora soporta posiciones parcialmente fuera de la imagen.
+    La función siempre retorna coordenadas, incluso si están fuera de los bordes.
 
     Args:
         image (np.ndarray): Imagen original.
@@ -63,17 +66,13 @@ def align_watermark(
         side_y (str): 'top', 'center' o 'bottom' para alinear verticalmente.
 
     Returns:
-        tuple[int, int] | None: Coordenadas (x, y) donde posicionar la marca de agua, 
-        o None si la marca de agua es más grande que la imagen.
+        tuple[int, int]: Coordenadas (x, y) donde posicionar la marca de agua.
+        Las coordenadas pueden ser negativas o fuera de la imagen.
     """
     h_img, w_img, _ = image.shape
     h_wm, w_wm, _ = watermark.shape
 
-    if h_wm > h_img or w_wm > w_img:
-        # Marca de agua mas grande que la imagen
-        return None  
-
-    # Coordenadas X
+    # Coordenadas X (pueden ser negativas o mayores que el ancho)
     if side_x == 'left':
         x = offset_x
     elif side_x == 'center':
@@ -81,7 +80,7 @@ def align_watermark(
     elif side_x == 'right':
         x = w_img - w_wm - offset_x
 
-    # Coordenadas Y
+    # Coordenadas Y (pueden ser negativas o mayores que el alto)
     if side_y == 'top':
         y = offset_y
     elif side_y == 'center':
@@ -136,24 +135,51 @@ def generar_mascara_watermark(watermark: np.ndarray) -> np.ndarray:
 
 
 def remove_watermark(
-    image:np.ndarray, 
-    watermark:np.ndarray, 
-    x:int, 
+    image:np.ndarray,
+    watermark:np.ndarray,
+    x:int,
     y:int
 )-> np.ndarray:
-    """Elimina la marca de agua de la imagen usando la ecuación de canal alfa."""
-    x, y = int(x), int(y)
-    h_wm, w_wm, _ = watermark.shape
-    roi = image[y:y+h_wm, x:x+w_wm].astype(np.float32)
-    wm = watermark.astype(np.float32)
+    """
+    Elimina la marca de agua de la imagen usando la ecuación de canal alfa.
 
-    alpha = wm[:, :, 3] / 255.0  
-    alpha = alpha[:, :, np.newaxis]  
-    alpha_safe = np.clip(1 - alpha, 1e-5, 1)  
-    new_region = (roi / alpha_safe) - (wm[:, :, :3] * (alpha / alpha_safe))
+    Soporta marcas de agua parcialmente fuera de los bordes de la imagen.
+    Solo procesa la parte de la marca que está dentro de la imagen.
+    """
+    x, y = int(x), int(y)
+    h_img, w_img = image.shape[:2]
+    h_wm, w_wm, _ = watermark.shape
+
+    # Calcular la región de superposición (clipping)
+    # Coordenadas en la imagen
+    x_start_img = max(0, x)
+    y_start_img = max(0, y)
+    x_end_img = min(w_img, x + w_wm)
+    y_end_img = min(h_img, y + h_wm)
+
+    # Coordenadas en la marca de agua (qué parte usar)
+    x_start_wm = max(0, -x)
+    y_start_wm = max(0, -y)
+    x_end_wm = x_start_wm + (x_end_img - x_start_img)
+    y_end_wm = y_start_wm + (y_end_img - y_start_img)
+
+    # Si no hay superposición, no hacer nada
+    if x_start_img >= x_end_img or y_start_img >= y_end_img:
+        return image
+
+    # Extraer solo la parte que se superpone
+    roi = image[y_start_img:y_end_img, x_start_img:x_end_img].astype(np.float32)
+    wm_cropped = watermark[y_start_wm:y_end_wm, x_start_wm:x_end_wm].astype(np.float32)
+
+    # Aplicar la ecuación de eliminación de marca de agua
+    alpha = wm_cropped[:, :, 3] / 255.0
+    alpha = alpha[:, :, np.newaxis]
+    alpha_safe = np.clip(1 - alpha, 1e-5, 1)
+    new_region = (roi / alpha_safe) - (wm_cropped[:, :, :3] * (alpha / alpha_safe))
     new_region = np.clip(new_region, 0, 255).astype(np.uint8)
 
-    image[y:y+h_wm, x:x+w_wm, :3] = new_region
+    # Escribir de vuelta solo la región procesada
+    image[y_start_img:y_end_img, x_start_img:x_end_img, :3] = new_region
     return image
 
 
