@@ -148,9 +148,9 @@ class WatermarkTab(QWidget):
         return None
 
     def _load_watermarks(self):
-        """Carga Las marcas de agua disponibles"""
+        """Carga las carpetas de marcas de agua disponibles desde WatermarkRemove/marcas"""
         try:
-            # Obtener la ruta del JSON de posiciones
+            # Obtener la ruta base de marcas
             wm_dir = os.path.dirname(current_dir)
             marcas_dir = Path(wm_dir) / 'marcas'
 
@@ -158,17 +158,17 @@ class WatermarkTab(QWidget):
                 self.log("Marcas de agua no encontradas.")
                 return
 
-            # Cargar sitios disponibles
-            marcas_list = marcas_dir.iterdir()
-            sites = [p.name for p in marcas_list if p.is_dir()]
-            sites.sort(reverse=True)
-            
-            # Agregar al combobox
+            # Obtener subcarpetas ordenadas (más recientes primero)
+            folders = [f for f in marcas_dir.iterdir() if f.is_dir()]
+            folders.sort(reverse=True)
+
+            # Agregar al combobox: label = nombre, data = ruta completa
             self.watermarks.clear()
-            self.watermarks.addItems(sites)
+            for folder in folders:
+                self.watermarks.addItem(folder.name, str(folder))
 
         except Exception as e:
-            self.log(f"Error marcas de agua: {e}")
+            self.log(f"Error cargando marcas de agua: {e}")
 
     def log(self, message: str):
         """Agrega un mensaje a la consola de proceso"""
