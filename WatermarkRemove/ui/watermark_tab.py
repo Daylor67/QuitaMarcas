@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
-    QCheckBox, QLabel, QComboBox, QTextEdit
+    QCheckBox, QLabel, QComboBox, QTextEdit, QPushButton
 )
 from PySide6.QtCore import Qt
 
@@ -17,6 +17,8 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 from utils import UtilJson
+from .image_viewer import ImageViewer
+from .position_editor import PositionEditor
 
 
 class WatermarkTab(QWidget):
@@ -30,7 +32,7 @@ class WatermarkTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._setup_ui()
-        self._load_newtoki_numbers()
+        self._load_watermarks()
 
     def _setup_ui(self):
         """Configura la interfaz de usuario"""
@@ -49,17 +51,26 @@ class WatermarkTab(QWidget):
         self.run_quita_marcas = QCheckBox("Ejecutar Quita Marcas")
         settings_layout.addWidget(self.run_quita_marcas)
 
-        # CheckBox: Omitir
-        self.omitir_checkbox = QCheckBox("[V1] Omitir primera imagen | [V2] sin marca color")
-        settings_layout.addWidget(self.omitir_checkbox)
 
-        # Label: Número de Newtoki
-        newtoki_label = QLabel("Numero de Newtoki")
+        # Label: Seleccion de marca de agua
+        newtoki_label = QLabel("Seleccion de marca de agua")
         settings_layout.addWidget(newtoki_label)
 
         # ComboBox: Selector de número
-        self.newtoki_number = QComboBox()
-        settings_layout.addWidget(self.newtoki_number)
+        self.watermarks = QComboBox()
+        settings_layout.addWidget(self.watermarks)
+
+        # Botón para abrir visor de imágenes
+        self.view_images_btn = QPushButton("Ver Imágenes de Input")
+        self.view_images_btn.setStyleSheet("padding: 8px; background-color: #2196F3; color: white;")
+        self.view_images_btn.clicked.connect(self._open_image_viewer)
+        settings_layout.addWidget(self.view_images_btn)
+
+        # Botón para abrir editor de posiciones
+        self.edit_positions_btn = QPushButton("⚙️ Editor de Posiciones de Marcas")
+        self.edit_positions_btn.setStyleSheet("padding: 8px; background-color: #FF9800; color: white; font-weight: bold;")
+        self.edit_positions_btn.clicked.connect(self._open_position_editor)
+        settings_layout.addWidget(self.edit_positions_btn)
 
         # Layout horizontal (placeholder para futuros controles)
         post_process_layout = QHBoxLayout()
@@ -79,44 +90,85 @@ class WatermarkTab(QWidget):
 
     def _connect_signals(self):
         """Conecta las señales de los widgets"""
-        self.run_quita_marcas.stateChanged.connect(self._on_run_changed)
-        self.newtoki_number.currentTextChanged.connect(self._on_newtoki_changed)
+        pass
 
-    def _load_newtoki_numbers(self):
-        """Carga los números de Newtoki disponibles desde el JSON"""
+    def _open_image_viewer(self):
+        """Abre el visor de imágenes con la carpeta del inputField"""
+        try:
+            # Obtener el MainWindow desde el parent
+            main_window = self._get_main_window()
+
+            if main_window is None:
+                self.log("Error: No se pudo acceder a la ventana principal")
+                return
+
+            # Obtener la ruta del inputField
+            input_path = main_window.inputField.text()
+
+            if not input_path:
+                self.log("Error: No hay carpeta seleccionada en Input")
+                return
+
+            # Verificar que la ruta existe
+            if not Path(input_path).exists():
+                self.log(f"Error: La ruta no existe: {input_path}")
+                return
+
+            # Abrir el visor
+            self.log(f"Abriendo visor para: {input_path}")
+            viewer = ImageViewer(input_path, self)
+            viewer.exec()
+
+        except Exception as e:
+            self.log(f"Error al abrir visor: {str(e)}")
+
+    def _open_position_editor(self):
+        """Abre el editor de posiciones de marcas de agua"""
+        try:
+            self.log("Abriendo editor de posiciones...")
+            editor = PositionEditor(self)
+            result = editor.exec()
+
+            if result:
+                self.log("Editor cerrado correctamente")
+            else:
+                self.log("Editor cancelado")
+
+        except Exception as e:
+            self.log(f"Error al abrir editor: {str(e)}")
+
+    def _get_main_window(self):
+        """Busca y retorna el MainWindow (ventana principal)"""
+        widget = self.parent()
+        while widget is not None:
+            # Verificar si tiene el atributo inputField (característica del MainWindow)
+            if hasattr(widget, 'inputField'):
+                return widget
+            widget = widget.parent()
+        return None
+
+    def _load_watermarks(self):
+        """Carga Las marcas de agua disponibles"""
         try:
             # Obtener la ruta del JSON de posiciones
             wm_dir = os.path.dirname(current_dir)
-            positions_path = Path(wm_dir) / 'wm_poscition.json'
+            marcas_dir = Path(wm_dir) / 'marcas'
 
-            if not positions_path.exists():
-                self.log("Archivo de posiciones no encontrado")
+            if not marcas_dir.exists():
+                self.log("Marcas de agua no encontradas.")
                 return
 
             # Cargar sitios disponibles
-            positions_file = UtilJson(positions_path)
-            sites = positions_file.keys()
-
+            marcas_list = marcas_dir.iterdir()
+            sites = [p.name for p in marcas_list if p.is_dir()]
+            sites.sort(reverse=True)
+            
             # Agregar al combobox
-            self.newtoki_number.clear()
-            self.newtoki_number.addItems(sites)
-
-            self.log(f"Cargados {len(sites)} sitios: {', '.join(sites)}")
+            self.watermarks.clear()
+            self.watermarks.addItems(sites)
 
         except Exception as e:
-            self.log(f"Error cargando números de Newtoki: {e}")
-
-    def _on_run_changed(self, state):
-        """Callback cuando cambia el estado de 'Ejecutar Quita Marcas'"""
-        if state == Qt.CheckState.Checked.value:
-            self.log("Quita Marcas activado")
-        else:
-            self.log("Quita Marcas desactivado")
-
-    def _on_newtoki_changed(self, text):
-        """Callback cuando cambia el número de Newtoki seleccionado"""
-        if text:
-            self.log(f"Sitio seleccionado: {text}")
+            self.log(f"Error marcas de agua: {e}")
 
     def log(self, message: str):
         """Agrega un mensaje a la consola de proceso"""
@@ -129,13 +181,11 @@ class WatermarkTab(QWidget):
         Returns:
             dict: Configuración con las siguientes claves:
                 - run_quita_marcas (bool)
-                - omitir (bool)
                 - newtoki_number (str)
         """
         return {
             'run_quita_marcas': self.run_quita_marcas.isChecked(),
-            'omitir': self.omitir_checkbox.isChecked(),
-            'newtoki_number': self.newtoki_number.currentText()
+            'newtoki_number': self.watermarks.currentText()
         }
 
     def set_settings(self, settings: dict):
@@ -148,13 +198,10 @@ class WatermarkTab(QWidget):
         if 'run_quita_marcas' in settings:
             self.run_quita_marcas.setChecked(settings['run_quita_marcas'])
 
-        if 'omitir' in settings:
-            self.omitir_checkbox.setChecked(settings['omitir'])
-
         if 'newtoki_number' in settings:
-            index = self.newtoki_number.findText(settings['newtoki_number'])
+            index = self.watermarks.findText(settings['newtoki_number'])
             if index >= 0:
-                self.newtoki_number.setCurrentIndex(index)
+                self.watermarks.setCurrentIndex(index)
 
 
 # Para pruebas independientes
