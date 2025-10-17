@@ -306,17 +306,10 @@ def launch_process_async():
 
     # Verificar si el checkbox "Ejecutar Quita Marcas" está activado
     if watermark_tab.run_quita_marcas.isChecked():
-        # Obtener la carpeta de marca de agua seleccionada
-        watermark_folder = watermark_tab.watermarks.currentData()  # Ruta completa de la carpeta
-        watermark_name = watermark_tab.watermarks.currentText()    # Nombre de la carpeta
-
-        if not watermark_folder:
-            update_process_progress(0, "Error: No se ha seleccionado una marca de agua")
-            return
-
-        # Mostrar visor de imágenes ANTES de procesar (con información de marca de agua)
+        # Mostrar visor de imágenes ANTES de procesar (sin pre-selección de marca)
+        # El usuario seleccionará la marca de agua dentro del slideshow
         update_process_progress(0, "Abriendo visor de imágenes para revisión...")
-        viewer = SlideshowViewer(input_path, MainWindow, watermark_folder, watermark_name)
+        viewer = SlideshowViewer(input_path, MainWindow)
 
         # Ejecutar visor de forma modal (bloquea hasta que el usuario termine)
         viewer.exec()

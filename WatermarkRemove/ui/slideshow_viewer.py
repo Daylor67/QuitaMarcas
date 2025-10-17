@@ -311,6 +311,11 @@ class SlideshowViewer(QDialog):
             self.watermark_name = folder_name  # Actualizar el nombre
             self._load_watermarks_into_combo()
             self._load_watermark_positions()
+
+            # Crear carpeta de salida si aún no existe
+            if not self.output_folder and self.folder_path:
+                self._create_output_folder()
+
             # Actualizar la visualización
             self._show_current_image()
 

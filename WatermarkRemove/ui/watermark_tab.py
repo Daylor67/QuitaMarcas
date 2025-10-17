@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
-    QCheckBox, QLabel, QComboBox, QTextEdit, QPushButton
+    QCheckBox, QTextEdit, QPushButton
 )
 from PySide6.QtCore import Qt
 
@@ -32,7 +32,6 @@ class WatermarkTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._setup_ui()
-        self._load_watermarks()
 
     def _setup_ui(self):
         """Configura la interfaz de usuario"""
@@ -50,15 +49,6 @@ class WatermarkTab(QWidget):
         # CheckBox: Ejecutar Quita Marcas
         self.run_quita_marcas = QCheckBox("Ejecutar Quita Marcas")
         settings_layout.addWidget(self.run_quita_marcas)
-
-
-        # Label: Seleccion de marca de agua
-        newtoki_label = QLabel("Seleccion de marca de agua")
-        settings_layout.addWidget(newtoki_label)
-
-        # ComboBox: Selector de número
-        self.watermarks = QComboBox()
-        settings_layout.addWidget(self.watermarks)
 
         # Botón para abrir visor de imágenes
         self.view_images_btn = QPushButton("Ver Imágenes de Input")
@@ -147,29 +137,6 @@ class WatermarkTab(QWidget):
             widget = widget.parent()
         return None
 
-    def _load_watermarks(self):
-        """Carga las carpetas de marcas de agua disponibles desde WatermarkRemove/marcas"""
-        try:
-            # Obtener la ruta base de marcas
-            wm_dir = os.path.dirname(current_dir)
-            marcas_dir = Path(wm_dir) / 'marcas'
-
-            if not marcas_dir.exists():
-                self.log("Marcas de agua no encontradas.")
-                return
-
-            # Obtener subcarpetas ordenadas (más recientes primero)
-            folders = [f for f in marcas_dir.iterdir() if f.is_dir()]
-            folders.sort(reverse=True)
-
-            # Agregar al combobox: label = nombre, data = ruta completa
-            self.watermarks.clear()
-            for folder in folders:
-                self.watermarks.addItem(folder.name, str(folder))
-
-        except Exception as e:
-            self.log(f"Error cargando marcas de agua: {e}")
-
     def log(self, message: str):
         """Agrega un mensaje a la consola de proceso"""
         self.process_console.append(message)
@@ -181,11 +148,9 @@ class WatermarkTab(QWidget):
         Returns:
             dict: Configuración con las siguientes claves:
                 - run_quita_marcas (bool)
-                - newtoki_number (str)
         """
         return {
-            'run_quita_marcas': self.run_quita_marcas.isChecked(),
-            'newtoki_number': self.watermarks.currentText()
+            'run_quita_marcas': self.run_quita_marcas.isChecked()
         }
 
     def set_settings(self, settings: dict):
@@ -197,11 +162,6 @@ class WatermarkTab(QWidget):
         """
         if 'run_quita_marcas' in settings:
             self.run_quita_marcas.setChecked(settings['run_quita_marcas'])
-
-        if 'newtoki_number' in settings:
-            index = self.watermarks.findText(settings['newtoki_number'])
-            if index >= 0:
-                self.watermarks.setCurrentIndex(index)
 
 
 # Para pruebas independientes
