@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QPixmap
-
+from natsort import natsorted
 # Agregar el directorio raíz al path
 current_dir = os.path.abspath(os.path.dirname(__file__))
 parent_dir = os.path.dirname(os.path.dirname(current_dir))
@@ -95,7 +95,7 @@ class ImageViewer(QDialog):
             # Si es un archivo, usar su directorio padre
             self.folder_path = self.folder_path.parent
 
-        for file in sorted(self.folder_path.iterdir()):
+        for file in natsorted(self.folder_path.iterdir()):
             if file.is_file() and file.suffix.lower() in self.SUPPORTED_FORMATS:
                 image_files.append(file)
 

@@ -19,6 +19,7 @@ if parent_dir not in sys.path:
 
 from utils import UtilJson
 import numpy as np
+from natsort import natsorted
 from WatermarkRemove import align_watermark, remove_watermark
 from WatermarkRemove.wm_remove import load_images_cv2, guardar
 
@@ -268,7 +269,7 @@ class SlideshowViewer(QDialog):
             self.folder_path = self.folder_path.parent
 
         # Buscar todas las imágenes y ordenarlas
-        for file in sorted(self.folder_path.iterdir()):
+        for file in natsorted(self.folder_path.iterdir()):
             if file.is_file() and file.suffix.lower() in self.SUPPORTED_FORMATS:
                 self.image_files.append(file)
 
@@ -328,7 +329,7 @@ class SlideshowViewer(QDialog):
             return
 
         # Cargar todos los archivos PNG de la carpeta
-        for file in sorted(self.watermark_folder.iterdir()):
+        for file in natsorted(self.watermark_folder.iterdir()):
             if file.is_file() and file.suffix.lower() == '.png':
                 self.watermark_files.append(file)
                 # Agregar al ComboBox: nombre del archivo como label, ruta como data
@@ -346,7 +347,7 @@ class SlideshowViewer(QDialog):
             return
 
         self.watermark_files = []
-        for file in sorted(self.watermark_folder.iterdir()):
+        for file in natsorted(self.watermark_folder.iterdir()):
             if file.is_file() and file.suffix.lower() == '.png':
                 self.watermark_files.append(file)
 

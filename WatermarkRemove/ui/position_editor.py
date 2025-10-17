@@ -22,7 +22,7 @@ if parent_dir not in sys.path:
 
 from utils import UtilJson
 from WatermarkRemove import load_images_cv2, align_watermark, remove_watermark
-
+from natsort import natsorted
 
 class ZoomableImageLabel(QLabel):
     """Label que soporta zoom con scroll del mouse"""
@@ -370,7 +370,7 @@ class PositionEditor(QDialog):
             return
 
         self.image_files = []
-        for file in sorted(self.images_folder.iterdir()):
+        for file in natsorted(self.images_folder.iterdir()):
             if file.is_file() and file.suffix.lower() in self.SUPPORTED_FORMATS:
                 self.image_files.append(file)
 
@@ -386,7 +386,7 @@ class PositionEditor(QDialog):
             return
 
         # Cargar todos los archivos PNG de la carpeta
-        for file in sorted(self.watermarks_folder.iterdir()):
+        for file in natsorted(self.watermarks_folder.iterdir()):
             if file.is_file() and file.suffix.lower() == '.png':
                 self.watermark_files.append(file)
                 # Agregar al ComboBox: nombre del archivo como label, ruta como data
