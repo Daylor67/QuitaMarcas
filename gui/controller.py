@@ -70,6 +70,7 @@ def initialize_gui():
     # Aplica modo oscuro a la barra de título
     set_dark_title_bar(MainWindow)
     # Agregar pestaña de Watermark Remover (programáticamente)
+    global watermark_tab
     watermark_tab = WatermarkTab()
     MainWindow.mainTabWidget.addTab(watermark_tab, "Quita Marcas")
     # Controls Setup
@@ -289,7 +290,7 @@ def update_postprocess_console(message: str):
 
 
 def launch_process_async():
-    """Lanza el proceso de stitching, mostrando primero el visor de imágenes"""
+    """Lanza el proceso de stitching, mostrando primero el visor de imágenes si está habilitado"""
     MainWindow.processConsoleField.clear()
 
     # Obtener la ruta de input
@@ -303,18 +304,31 @@ def launch_process_async():
         update_process_progress(0, f"Error: La ruta no existe: {input_path}")
         return
 
-    # Mostrar visor de imágenes ANTES de procesar
-    update_process_progress(0, "Abriendo visor de imágenes para revisión...")
-    viewer = SlideshowViewer(input_path, MainWindow)
+    # Verificar si el checkbox "Ejecutar Quita Marcas" está activado
+    if watermark_tab.run_quita_marcas.isChecked():
+        # Obtener la carpeta de marca de agua seleccionada
+        watermark_folder = watermark_tab.watermarks.currentData()  # Ruta completa de la carpeta
+        watermark_name = watermark_tab.watermarks.currentText()    # Nombre de la carpeta
 
-    # Ejecutar visor de forma modal (bloquea hasta que el usuario termine)
-    viewer.exec()
+        if not watermark_folder:
+            update_process_progress(0, "Error: No se ha seleccionado una marca de agua")
+            return
 
-    # Si el usuario canceló (presionó ESC o cerró la ventana), no continuar
-    if not viewer.get_approved():
-        update_process_progress(0, "Proceso cancelado por el usuario")
-        return
+        # Mostrar visor de imágenes ANTES de procesar (con información de marca de agua)
+        update_process_progress(0, "Abriendo visor de imágenes para revisión...")
+        viewer = SlideshowViewer(input_path, MainWindow, watermark_folder, watermark_name)
 
-    # Si llegó aquí, el usuario aprobó -> iniciar proceso
+        # Ejecutar visor de forma modal (bloquea hasta que el usuario termine)
+        viewer.exec()
+
+        # Si el usuario canceló (presionó ESC o cerró la ventana), no continuar
+        if not viewer.get_approved():
+            update_process_progress(0, "Proceso cancelado por el usuario")
+            return
+    else:
+        # Si el checkbox no está activado, no mostrar slideshow viewer
+        update_process_progress(0, "Iniciando procesamiento directamente (sin revisión de marcas)...")
+
+    # Si llegó aquí, el usuario aprobó o el checkbox no estaba activado -> iniciar proceso
     update_process_progress(0, "Iniciando procesamiento...")
     processThread.start()
