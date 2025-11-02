@@ -52,13 +52,13 @@ class WatermarkTab(QWidget):
 
         # Botón para abrir visor de imágenes
         self.view_images_btn = QPushButton("Ver Imágenes de Input")
-        self.view_images_btn.setStyleSheet("padding: 8px; background-color: #2196F3; color: white;")
+        self.view_images_btn.setStyleSheet("padding: 8px; color: white;")
         self.view_images_btn.clicked.connect(self._open_image_viewer)
         settings_layout.addWidget(self.view_images_btn)
 
         # Botón para abrir editor de posiciones
         self.edit_positions_btn = QPushButton("⚙️ Editor de Posiciones de Marcas")
-        self.edit_positions_btn.setStyleSheet("padding: 8px; background-color: #FF9800; color: white; font-weight: bold;")
+        self.edit_positions_btn.setStyleSheet("padding: 8px; color: white; font-weight: bold;")
         self.edit_positions_btn.clicked.connect(self._open_position_editor)
         settings_layout.addWidget(self.edit_positions_btn)
 
@@ -83,6 +83,9 @@ class WatermarkTab(QWidget):
         pass
 
     def _open_image_viewer(self):
+        # TODO: En lugar de mostrar todas las imagenes, activar 
+        # unicamente cuando hay imagenes que puedan generar errores
+        
         """Abre el visor de imágenes con la carpeta del inputField"""
         try:
             # Obtener el MainWindow desde el parent
