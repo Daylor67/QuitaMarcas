@@ -8,8 +8,11 @@ from PySide6.QtWidgets import QDialog, QFileDialog
 
 from assets.SmartStitchLogo import icon
 from core.services import SettingsHandler
+from core.services.update_checker import UpdateChecker
 from core.utils.constants import OUTPUT_SUFFIX
+from core.utils.version import APP_VERSION, SMARTSTITCH_VERSION, WMR_VERSION, ORIGINAL_AUTHOR
 from gui.process import GuiStitchProcess
+from gui.update_dialog import UpdateDialog
 from WatermarkRemove.ui import WatermarkTab, SlideshowViewer
 
 SCRIPT_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
@@ -62,10 +65,9 @@ def initialize_gui():
     appIcon = QIcon(pixmap)
     MainWindow.setWindowIcon(appIcon)
     # Sets Window Title
-    appVersion = "3.1"
-    appAuthor = "MechTechnology"
-    wmr_version = '3.0'
-    title_wmr = f'WmRemove By Daylor [{wmr_version}]'
+    appVersion = SMARTSTITCH_VERSION
+    appAuthor = ORIGINAL_AUTHOR
+    title_wmr = f'WmRemove By Daylor [{WMR_VERSION}]'
     MainWindow.setWindowTitle(f"SmartStitch By {appAuthor} [{appVersion}] + {title_wmr}")
     # Aplica modo oscuro a la barra de título
     set_dark_title_bar(MainWindow)
@@ -82,6 +84,8 @@ def initialize_gui():
     processThread.postProcessConsole.connect(update_postprocess_console)
     # Show Window
     MainWindow.show()
+    # Verificar actualizaciones al inicio
+    check_for_updates()
 
 
 def on_load(load_profiles=True):
@@ -332,3 +336,32 @@ def launch_process_async():
     # Si llegó aquí, el usuario aprobó o el checkbox no estaba activado -> iniciar proceso
     update_process_progress(0, "Iniciando procesamiento...")
     processThread.start()
+
+
+def check_for_updates():
+    """Verifica si hay actualizaciones disponibles al iniciar la aplicación"""
+    try:
+        from PySide6.QtCore import QTimer
+
+        # Usar QTimer para no bloquear el inicio de la aplicación
+        def do_check():
+            updater = UpdateChecker()
+            has_update, latest_version, download_url, release_notes = updater.check_for_updates()
+
+            if has_update and download_url:
+                # Mostrar diálogo de actualización
+                dialog = UpdateDialog(
+                    MainWindow,
+                    APP_VERSION,
+                    latest_version,
+                    download_url,
+                    release_notes
+                )
+                dialog.exec()
+
+        # Verificar actualizaciones 2 segundos después de que se muestre la ventana
+        QTimer.singleShot(2000, do_check)
+
+    except Exception as e:
+        # Si falla la verificación, continuar normalmente sin mostrar error
+        print(f"No se pudo verificar actualizaciones: {e}")

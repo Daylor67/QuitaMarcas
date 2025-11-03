@@ -2,7 +2,7 @@ import sys
 from cx_Freeze import setup, Executable
 
 # Versión de la aplicación
-APP_VERSION = "3.1.0"
+APP_VERSION = "3.0 Beta"
 APP_NAME = "SmartStitch WR"
 APP_AUTHOR = "Daylor67"
 APP_DESCRIPTION = "SmartStitch con eliminación de marcas de agua"
@@ -22,6 +22,12 @@ packages = [
     "PySide6",
     "psd_tools",
     "numpy",
+    "packaging",
+    "urllib",
+    "json",
+    "zipfile",
+    "tempfile",
+    "subprocess",
 ]
 
 # Módulos que deben incluirse
@@ -31,6 +37,7 @@ includes = [
     "gui.controller",
     "gui.process",
     "gui.stylesheet",
+    "gui.update_dialog",
     "core.detectors.pixel_comparison",
     "core.detectors.direct_slicing",
     "core.models.app_profiles",
@@ -41,7 +48,9 @@ includes = [
     "core.services.image_handler",
     "core.services.image_manipulator",
     "core.services.directory_explorer",
+    "core.services.update_checker",
     "core.utils.constants",
+    "core.utils.version",
     "WatermarkRemove",
     "WatermarkRemove.wm_remove",
     "WatermarkRemove.ui.position_editor",
