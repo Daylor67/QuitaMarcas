@@ -3,7 +3,7 @@ import sys
 import cv2
 import numpy as np
 from pathlib import Path
-from typing import List, Union, Literal
+from typing import List, Union, Literal, Optional, Tuple
 from natsort import natsorted
 
 # Agregar el directorio padre al path para poder importar utils
@@ -135,53 +135,235 @@ def generar_mascara_watermark(watermark: np.ndarray) -> np.ndarray:
 
 
 def remove_watermark(
-    image:np.ndarray,
-    watermark:np.ndarray,
-    x:int,
-    y:int
-)-> np.ndarray:
+    image: np.ndarray,
+    watermark: np.ndarray,
+    x: float,
+    y: float,
+    transparency_threshold: int = 6,
+    opaque_threshold: int = 240,
+    alpha_adjust: float = 1.0,
+    apply_jpeg_filter: bool = True,
+    jpeg_filter_strength: int = 3,
+    jpeg_filter_threshold: int = 4
+) -> np.ndarray:
     """
-    Elimina la marca de agua de la imagen usando la ecuación de canal alfa.
-
-    Soporta marcas de agua parcialmente fuera de los bordes de la imagen.
-    Solo procesa la parte de la marca que está dentro de la imagen.
+    Elimina la marca de agua de la imagen usando la fórmula de Fire.
+    
+    Args:
+        image: Imagen BGR con marca de agua (uint8)
+        watermark: Marca de agua BGRA con canal alfa (uint8)
+        x, y: Posición de la marca de agua en la imagen (puede ser float para subpíxel)
+        transparency_threshold: Umbral mínimo de opacidad para procesar (0-255)
+        opaque_threshold: Umbral para suavizado de píxeles muy opacos (0-255)
+        alpha_adjust: Ajuste de opacidad de la marca (0.5-1.5)
+        apply_jpeg_filter: Aplicar filtro de ruido JPEG
+        jpeg_filter_strength: Intensidad del blur del filtro JPEG
+        jpeg_filter_threshold: Umbral de detección de bordes para JPEG filter
+    
+    Returns:
+        Imagen sin marca de agua (uint8)
     """
-    x, y = int(x), int(y)
+    # Separar parte entera y subpíxel
+    x_int = int(np.floor(x))
+    y_int = int(np.floor(y))
+    x_sub = x % 1
+    y_sub = y % 1
+    
     h_img, w_img = image.shape[:2]
-    h_wm, w_wm, _ = watermark.shape
-
-    # Calcular la región de superposición (clipping)
-    # Coordenadas en la imagen
-    x_start_img = max(0, x)
-    y_start_img = max(0, y)
-    x_end_img = min(w_img, x + w_wm)
-    y_end_img = min(h_img, y + h_wm)
-
-    # Coordenadas en la marca de agua (qué parte usar)
-    x_start_wm = max(0, -x)
-    y_start_wm = max(0, -y)
+    h_wm, w_wm = watermark.shape[:2]
+    
+    # Si hay desplazamiento subpíxel, trasladar la marca de agua
+    wm_translated = watermark.copy()
+    if x_sub != 0 or y_sub != 0:
+        M = np.float32([[1, 0, x_sub], [0, 1, y_sub]])
+        wm_translated = cv2.warpAffine(
+            watermark, M, (w_wm, h_wm),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=0
+        )
+    
+    # Calcular región de superposición
+    x_start_img = max(0, x_int)
+    y_start_img = max(0, y_int)
+    x_end_img = min(w_img, x_int + w_wm)
+    y_end_img = min(h_img, y_int + h_wm)
+    
+    x_start_wm = max(0, -x_int)
+    y_start_wm = max(0, -y_int)
     x_end_wm = x_start_wm + (x_end_img - x_start_img)
     y_end_wm = y_start_wm + (y_end_img - y_start_img)
-
-    # Si no hay superposición, no hacer nada
+    
     if x_start_img >= x_end_img or y_start_img >= y_end_img:
         return image
+    
+    # Copiar imagen para no modificar el original
+    result = image.copy().astype(np.float32)
+    
+    # Extraer región de interés
+    roi = result[y_start_img:y_end_img, x_start_img:x_end_img]
+    wm_cropped = wm_translated[y_start_wm:y_end_wm, x_start_wm:x_end_wm].astype(np.float32)
+    
+    # Extraer canal alfa y aplicar ajuste
+    alpha = wm_cropped[:, :, 3].copy()
+    alpha = np.clip(alpha * alpha_adjust, 0, 255)
+    
+    h, w = roi.shape[:2]
+    
+    # Aplicar la fórmula de Fire píxel por píxel (como en JS)
+    for i in range(h):
+        for j in range(w):
+            alpha_val = alpha[i, j]
+            
+            # Solo procesar si supera el umbral de transparencia
+            if alpha_val > transparency_threshold:
+                # Fórmula de Fire
+                alpha_img = 255.0 / (255.0 - alpha_val)
+                alpha_wm = -alpha_val / (255.0 - alpha_val)
+                
+                # Aplicar a cada canal
+                for c in range(3):
+                    new_val = alpha_img * roi[i, j, c] + alpha_wm * wm_cropped[i, j, c]
+                    roi[i, j, c] = new_val
+                
+                # Suavizado de píxeles muy opacos
+                if alpha_val > opaque_threshold and j > 0:
+                    factor = (alpha_val - opaque_threshold) / (255.0 - opaque_threshold)
+                    for c in range(3):
+                        roi[i, j, c] = factor * roi[i, j-1, c] + (1 - factor) * roi[i, j, c]
+    
+    # Clip values
+    roi = np.clip(roi, 0, 255)
+    result[y_start_img:y_end_img, x_start_img:x_end_img] = roi
+    
+    # Aplicar filtro JPEG si está habilitado
+    if apply_jpeg_filter:
+        result = apply_jpeg_noise_filter(
+            result.astype(np.uint8),
+            alpha,
+            (x_start_img, y_start_img, x_end_img, y_end_img),
+            jpeg_filter_strength,
+            jpeg_filter_threshold,
+            transparency_threshold
+        )
+        return result
+    
+    return result.astype(np.uint8)
 
-    # Extraer solo la parte que se superpone
-    roi = image[y_start_img:y_end_img, x_start_img:x_end_img].astype(np.float32)
-    wm_cropped = watermark[y_start_wm:y_end_wm, x_start_wm:x_end_wm].astype(np.float32)
 
-    # Aplicar la ecuación de eliminación de marca de agua
-    alpha = wm_cropped[:, :, 3] / 255.0
-    alpha = alpha[:, :, np.newaxis]
-    alpha_safe = np.clip(1 - alpha, 1e-5, 1)
-    new_region = (roi / alpha_safe) - (wm_cropped[:, :, :3] * (alpha / alpha_safe))
-    new_region = np.clip(new_region, 0, 255).astype(np.uint8)
+def apply_jpeg_noise_filter(
+    image: np.ndarray,
+    watermark_alpha: np.ndarray,
+    roi_coords: Tuple[int, int, int, int],
+    strength: int = 3,
+    edge_threshold: int = 4,
+    transparency_threshold: int = 3
+) -> np.ndarray:
+    """
+    Aplica el filtro de ruido JPEG exactamente como en el JS.
+    
+    Este filtro:
+    1. Aplica blur a la región procesada
+    2. Solo en el área donde había marca de agua
+    3. Opcionalmente aplica surface blur para preservar bordes
+    """
+    x_start, y_start, x_end, y_end = roi_coords
+    result = image.copy()
+    
+    h = y_end - y_start
+    w = x_end - x_start
+    
+    # Extraer la región procesada
+    roi = result[y_start:y_end, x_start:x_end].copy().astype(np.float32)
+    
+    # 1. Crear máscara donde había marca de agua (alpha > threshold)
+    watermark_mask = (watermark_alpha > transparency_threshold).astype(np.uint8) * 255
+    
+    # 2. Aplicar blur
+    ksize = max(3, strength * 2 + 1)
+    if ksize % 2 == 0:
+        ksize += 1
+    blurred = cv2.GaussianBlur(roi, (ksize, ksize), strength)
+    
+    # 3. Crear canvas para el resultado del blur
+    blur_canvas = roi.copy()
+    
+    # 4. Aplicar la máscara: solo donde había marca de agua
+    for i in range(h):
+        for j in range(w):
+            if watermark_mask[i, j] > 0:
+                blur_canvas[i, j] = blurred[i, j]
+    
+    # 5. Mezclar usando composite operation 'color' (mantener luminosidad original)
+    # Convertir a HSV para separar luminosidad de color
+    roi_hsv = cv2.cvtColor(roi.astype(np.uint8), cv2.COLOR_BGR2HSV).astype(np.float32)
+    blur_hsv = cv2.cvtColor(blur_canvas.astype(np.uint8), cv2.COLOR_BGR2HSV).astype(np.float32)
+    
+    # Mantener V (Value/luminosidad) del original, tomar H y S del blur
+    roi_hsv[:, :, 0] = blur_hsv[:, :, 0]  # Hue del blur
+    roi_hsv[:, :, 1] = blur_hsv[:, :, 1]  # Saturation del blur
+    # V se mantiene del original (roi_hsv[:, :, 2] no cambia)
+    
+    result_with_color = cv2.cvtColor(roi_hsv.astype(np.uint8), cv2.COLOR_HSV2BGR).astype(np.float32)
+    
+    # 6. Aplicar surface blur si el threshold > 0
+    if edge_threshold > 0:
+        result_with_color = surface_blur(
+            result_with_color.astype(np.uint8),
+            edge_threshold,
+            strength,
+            watermark_mask
+        ).astype(np.float32)
+    
+    # 7. Escribir resultado de vuelta
+    result[y_start:y_end, x_start:x_end] = np.clip(result_with_color, 0, 255).astype(np.uint8)
+    
+    return result
 
-    # Escribir de vuelta solo la región procesada
-    image[y_start_img:y_end_img, x_start_img:x_end_img, :3] = new_region
-    return image
 
+def surface_blur(
+    image: np.ndarray,
+    threshold: int,
+    strength: int,
+    mask: np.ndarray
+) -> np.ndarray:
+    """
+    Surface blur: difumina áreas planas pero preserva bordes.
+    
+    Algoritmo:
+    1. Detectar bordes mediante diferencia de blurs
+    2. Crear máscara de áreas planas (no-bordes)
+    3. Aplicar blur solo en áreas planas
+    """
+    h, w = image.shape[:2]
+    
+    # 1. Detección de bordes - dos niveles de blur
+    blur1 = cv2.GaussianBlur(image, (3, 3), 1)
+    blur2 = cv2.GaussianBlur(image, (7, 7), 3)
+    
+    # 2. Diferencia = detecta bordes
+    edge_detect = cv2.absdiff(blur1, blur2)
+    edge_gray = cv2.cvtColor(edge_detect, cv2.COLOR_BGR2GRAY)
+    
+    # 3. Crear máscara: alpha = 255 donde NO hay bordes (áreas planas)
+    # alpha = 0 donde hay bordes
+    flat_mask = np.zeros((h, w), dtype=np.uint8)
+    flat_mask[edge_gray <= threshold] = 255
+    
+    # 4. Aplicar máscara de watermark (solo procesar donde había marca)
+    flat_mask = cv2.bitwise_and(flat_mask, mask)
+    
+    # 5. Aplicar blur a la imagen
+    ksize = max(3, strength * 2 + 1)
+    if ksize % 2 == 0:
+        ksize += 1
+    blurred = cv2.GaussianBlur(image, (ksize, ksize), strength)
+    
+    # 6. Combinar: blur donde flat_mask = 255, original donde flat_mask = 0
+    result = image.copy()
+    result[flat_mask > 0] = blurred[flat_mask > 0]
+    
+    return result
 
 def guardar(image_path: Path, result: np.ndarray, output_folder: Path):
     """Guarda la imagen procesada en la misma estructura dentro la carpeta de salida."""
