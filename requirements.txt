@@ -1,0 +1,6 @@
+natsort
+pillow
+opencv-python
+pyside6
+pyqtdarktheme
+psd-tools

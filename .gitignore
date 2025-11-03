@@ -6,3 +6,8 @@ __logs__/
 __settings__/
 *.pickle
 *.log
+/venv
+/.claude
+/WatermarkRemove/marcas/**
+WatermarkRemove/wm_positions.json
+*_old.py

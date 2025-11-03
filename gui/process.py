@@ -31,7 +31,7 @@ class GuiStitchProcess:
         postprocess_runner = PostProcessRunner()
         detector = select_detector(detection_type=settings.load("detector_type"))
         input_path = kwargs.get("input_path", "")
-        output_path = kwargs.get("input_path", "")
+        output_path = kwargs.get("output_path", "")
         status_func = kwargs.get("status_func", print)
         console_func = kwargs.get("console_func", print)
         step_percentages = {
@@ -51,7 +51,7 @@ class GuiStitchProcess:
         start_time = time()
         percentage = 0.0
         status_func(percentage, 'Exploring input directory for working directories')
-        input_dirs = explorer.run(input=input_path, output_path=output_path)
+        input_dirs = explorer.run(input=input_path, output=output_path)
         input_dirs_count = len(input_dirs)
         status_func(
             percentage,

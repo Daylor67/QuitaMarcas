@@ -180,5 +180,5 @@ QAbstractItemView::indicator:checked {
 
 
 def load_styling():
-    main_styles = load_stylesheet("light")
-    return main_styles + LIGHT_STYLE_SHEET
+    main_styles = load_stylesheet('dark')
+    return main_styles #+ LIGHT_STYLE_SHEET

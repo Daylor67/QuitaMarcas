@@ -1,4 +1,5 @@
 import os
+import sys
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QIcon, QPixmap
@@ -9,8 +10,25 @@ from assets.SmartStitchLogo import icon
 from core.services import SettingsHandler
 from core.utils.constants import OUTPUT_SUFFIX
 from gui.process import GuiStitchProcess
+from WatermarkRemove.ui import WatermarkTab, SlideshowViewer
 
 SCRIPT_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
+
+
+def set_dark_title_bar(window):
+    """Aplica el modo oscuro a la barra de título en Windows 10/11"""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import windll
+            hwnd = int(window.winId())
+            # DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+            # Forzar modo oscuro en la barra de título
+            windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 19, ctypes.byref(ctypes.c_int(1)), ctypes.sizeof(ctypes.c_int)
+            )
+        except Exception as e:
+            print(f"No se pudo aplicar el modo oscuro a la barra de título: {e}")
 
 
 class ProcessThread(QThread):
@@ -46,7 +64,15 @@ def initialize_gui():
     # Sets Window Title
     appVersion = "3.1"
     appAuthor = "MechTechnology"
-    MainWindow.setWindowTitle("SmartStitch By {0} [{1}]".format(appAuthor, appVersion))
+    wmr_version = '3.0'
+    title_wmr = f'WmRemove By Daylor [{wmr_version}]'
+    MainWindow.setWindowTitle(f"SmartStitch By {appAuthor} [{appVersion}] + {title_wmr}")
+    # Aplica modo oscuro a la barra de título
+    set_dark_title_bar(MainWindow)
+    # Agregar pestaña de Watermark Remover (programáticamente)
+    global watermark_tab
+    watermark_tab = WatermarkTab()
+    MainWindow.mainTabWidget.addTab(watermark_tab, "Quita Marcas")
     # Controls Setup
     on_load()
     bind_signals()
@@ -264,5 +290,45 @@ def update_postprocess_console(message: str):
 
 
 def launch_process_async():
+    """Lanza el proceso de stitching, mostrando primero el visor de imágenes si está habilitado"""
     MainWindow.processConsoleField.clear()
+
+    # Obtener la ruta de input
+    input_path = MainWindow.inputField.text()
+
+    if not input_path:
+        update_process_progress(0, "Error: No se ha seleccionado ninguna carpeta")
+        return
+
+    if not os.path.exists(input_path):
+        update_process_progress(0, f"Error: La ruta no existe: {input_path}")
+        return
+
+    # Verificar si el checkbox "Ejecutar Quita Marcas" está activado
+    if watermark_tab.run_quita_marcas.isChecked():
+        # Mostrar visor de imágenes ANTES de procesar (sin pre-selección de marca)
+        # El usuario seleccionará la marca de agua dentro del slideshow
+        update_process_progress(0, "Abriendo visor de imágenes para revisión...")
+        viewer = SlideshowViewer(input_path, MainWindow, watermark_tab=watermark_tab)
+
+        # Ejecutar visor de forma modal (bloquea hasta que el usuario termine)
+        viewer.exec()
+
+        # Si el usuario canceló (presionó ESC o cerró la ventana), no continuar
+        if not viewer.get_approved():
+            update_process_progress(0, "Proceso cancelado por el usuario")
+            return
+
+        # Si se procesaron imágenes, actualizar el inputField para usar la carpeta de salida
+        if viewer.has_processed_images():
+            output_folder = viewer.get_output_folder()
+            if output_folder and output_folder.exists():
+                MainWindow.inputField.setText(str(output_folder))
+                update_process_progress(0, f"Ruta actualizada a: {output_folder}")
+    else:
+        # Si el checkbox no está activado, no mostrar slideshow viewer
+        update_process_progress(0, "Iniciando procesamiento directamente (sin revisión de marcas)...")
+
+    # Si llegó aquí, el usuario aprobó o el checkbox no estaba activado -> iniciar proceso
+    update_process_progress(0, "Iniciando procesamiento...")
     processThread.start()
