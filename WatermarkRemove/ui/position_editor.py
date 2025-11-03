@@ -136,7 +136,7 @@ class PositionEditor(QDialog):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Carpetas
-        folders_group = QGroupBox("📁 Selección")
+        folders_group = QGroupBox("Selección")
         folders_layout = QVBoxLayout()
         folders_layout.setSpacing(6)
 
@@ -170,64 +170,92 @@ class PositionEditor(QDialog):
         layout.addWidget(folders_group)
 
         # Controles de posición
-        position_group = QGroupBox("🎮 Posición")
+        position_group = QGroupBox("Posición")
         position_layout = QVBoxLayout()
         position_layout.setSpacing(8)
 
-        # Side X
-        position_layout.addWidget(QLabel("Horizontal:"))
+        # Fila 1: ComboBox de posición (Horizontal y Vertical lado a lado)
+        position_combos_container = QWidget()
+        position_combos_layout = QHBoxLayout(position_combos_container)
+        position_combos_layout.setContentsMargins(0, 0, 0, 0)
+        position_combos_layout.setSpacing(10)
+
+        # Columna Horizontal
+        horizontal_container = QWidget()
+        horizontal_layout = QVBoxLayout(horizontal_container)
+        horizontal_layout.setContentsMargins(0, 0, 0, 0)
+        horizontal_layout.setSpacing(4)
+        
+        horizontal_layout.addWidget(QLabel("Horizontal:"))
         self.side_x_combo = QComboBox()
         self.side_x_combo.addItem("Izquierda", "left")
         self.side_x_combo.addItem("Centro", "center")
         self.side_x_combo.addItem("Derecha", "right")
         self.side_x_combo.currentIndexChanged.connect(self._on_position_changed)
-        position_layout.addWidget(self.side_x_combo)
+        horizontal_layout.addWidget(self.side_x_combo)
+        
+        position_combos_layout.addWidget(horizontal_container, 1)
 
-        # Side Y
-        position_layout.addWidget(QLabel("Vertical:"))
+        # Columna Vertical
+        vertical_container = QWidget()
+        vertical_layout = QVBoxLayout(vertical_container)
+        vertical_layout.setContentsMargins(0, 0, 0, 0)
+        vertical_layout.setSpacing(4)
+        
+        vertical_layout.addWidget(QLabel("Vertical:"))
         self.side_y_combo = QComboBox()
         self.side_y_combo.addItem("Arriba", "top")
         self.side_y_combo.addItem("Centro", "center")
         self.side_y_combo.addItem("Abajo", "bottom")
         self.side_y_combo.currentIndexChanged.connect(self._on_position_changed)
-        position_layout.addWidget(self.side_y_combo)
+        vertical_layout.addWidget(self.side_y_combo)
+        
+        position_combos_layout.addWidget(vertical_container, 1)
 
-        # Offsets con botones y SpinBox editable
+        position_layout.addWidget(position_combos_container)
+
+        # Título de Ajuste Fino
         position_layout.addWidget(QLabel("Ajuste Fino (pixel):"))
 
-        # Control de Offset X
+        # Fila 2: SpinBox de offset (Horizontal y Vertical lado a lado)
+        offset_container = QWidget()
+        offset_layout = QHBoxLayout(offset_container)
+        offset_layout.setContentsMargins(0, 0, 0, 0)
+        offset_layout.setSpacing(10)
+
+        # Columna Offset X
         offset_x_container = QWidget()
-        offset_x_layout = QHBoxLayout(offset_x_container)
+        offset_x_layout = QVBoxLayout(offset_x_container)
         offset_x_layout.setContentsMargins(0, 0, 0, 0)
-        offset_x_layout.setSpacing(5)
-
-        offset_x_layout.addWidget(QLabel("Horizontal:\t"))
-
+        offset_x_layout.setSpacing(4)
+        
+        offset_x_layout.addWidget(QLabel("Horizontal:"))
         self.offset_x_spin = QSpinBox()
         self.offset_x_spin.setRange(-9999, 9999)
         self.offset_x_spin.setValue(0)
         self.offset_x_spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.offset_x_spin.valueChanged.connect(lambda v: self._on_offset_spin_changed('x', v))
-        offset_x_layout.addWidget(self.offset_x_spin, 1)
+        offset_x_layout.addWidget(self.offset_x_spin)
+        
+        offset_layout.addWidget(offset_x_container, 1)
 
-        position_layout.addWidget(offset_x_container)
-
-        # Control de Offset Y
+        # Columna Offset Y
         offset_y_container = QWidget()
-        offset_y_layout = QHBoxLayout(offset_y_container)
+        offset_y_layout = QVBoxLayout(offset_y_container)
         offset_y_layout.setContentsMargins(0, 0, 0, 0)
-        offset_y_layout.setSpacing(5)
-
-        offset_y_layout.addWidget(QLabel("Vertical:\t\t"))
-
+        offset_y_layout.setSpacing(4)
+        
+        offset_y_layout.addWidget(QLabel("Vertical:"))
         self.offset_y_spin = QSpinBox()
         self.offset_y_spin.setRange(-9999, 9999)
         self.offset_y_spin.setValue(0)
         self.offset_y_spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.offset_y_spin.valueChanged.connect(lambda v: self._on_offset_spin_changed('y', v))
-        offset_y_layout.addWidget(self.offset_y_spin, 1)
+        offset_y_layout.addWidget(self.offset_y_spin)
+        
+        offset_layout.addWidget(offset_y_container, 1)
 
-        position_layout.addWidget(offset_y_container)
+        position_layout.addWidget(offset_container)
 
         position_group.setLayout(position_layout)
         layout.addWidget(position_group)
