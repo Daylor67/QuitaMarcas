@@ -1,8 +1,7 @@
 import sys
 from cx_Freeze import setup, Executable
-
+from core.utils.version import APP_VERSION
 # Versión de la aplicación
-APP_VERSION = "3.0 Beta"
 APP_NAME = "SmartStitch WR"
 APP_AUTHOR = "Daylor67"
 APP_DESCRIPTION = "SmartStitch con eliminación de marcas de agua"

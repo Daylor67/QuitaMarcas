@@ -67,7 +67,7 @@ def initialize_gui():
     # Sets Window Title
     appVersion = SMARTSTITCH_VERSION
     appAuthor = ORIGINAL_AUTHOR
-    title_wmr = f'WmRemove By Daylor [{WMR_VERSION}]'
+    title_wmr = f'QuitaMarcas By Daylor [{WMR_VERSION}]'
     MainWindow.setWindowTitle(f"SmartStitch By {appAuthor} [{appVersion}] + {title_wmr}")
     # Aplica modo oscuro a la barra de título
     set_dark_title_bar(MainWindow)
