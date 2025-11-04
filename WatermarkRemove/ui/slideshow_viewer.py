@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, QGridLayout,
     QScrollArea, QGraphicsOpacityEffect, QComboBox, QGroupBox, QCheckBox
 )
-from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QRect
+from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QRect, QEvent, QPoint
 from PySide6.QtGui import QPixmap, QKeyEvent, QWheelEvent, QPainter, QPen, QColor, QMouseEvent, QImage
 
 # Agregar el directorio raíz al path
@@ -73,6 +73,13 @@ class SlideshowViewer(QDialog):
         self.processed_images = set()  # Set de índices de imágenes ya procesadas
         self.processed_positions = {}  # Diccionario: {image_index: set(pos_names)} - posiciones procesadas por imagen
         self.watermark_rectangles = {}  # Diccionario: pos_name -> QRect (para detección de clicks)
+
+        # Modo selección manual
+        self.manual_mode_enabled = False  # Si está activado el modo manual
+        self.manual_overlay_label = None  # Label flotante para el overlay
+        self.mouse_position = None  # Posición actual del cursor (QPoint)
+        self.preview_image = None  # Imagen con marca removida (temporal, numpy array)
+        self.is_preview_active = False  # Si hay un preview activo esperando confirmación
 
         self._setup_ui()
         self._load_image_list()
@@ -158,7 +165,7 @@ class SlideshowViewer(QDialog):
 
         layout.addWidget(info_group)
 
-        # Carpetas  ////////////////////////////////////////
+        # Selección  ////////////////////////////////////////
         seleccion_group = QGroupBox("📁 Selección")
         seleccion_layout = QVBoxLayout(seleccion_group)
         seleccion_layout.setSpacing(5)
@@ -180,9 +187,35 @@ class SlideshowViewer(QDialog):
         # Cargar las carpetas de marcas disponibles
         self._load_watermark_folders()
 
-        # Checkbox opciones avanzadas
-        opciones_avanzadas = QCheckBox("Opciones avanzadas")
-        seleccion_layout.addWidget(opciones_avanzadas)
+        # Checkbox modo selección manual
+        self.opciones_avanzadas = QCheckBox("Modo selección manual")
+        self.opciones_avanzadas.stateChanged.connect(self._toggle_manual_mode)
+        seleccion_layout.addWidget(self.opciones_avanzadas)
+
+        # Botones de modo manual (ocultos por defecto)
+        self.remove_btn = QPushButton("Remover marca")
+        self.remove_btn.clicked.connect(self._remove_watermark_preview)
+        self.remove_btn.setStyleSheet("padding: 8px; font-size: 11px; background-color: #FF9800; color: white; font-weight: bold;")
+        self.remove_btn.hide()
+        seleccion_layout.addWidget(self.remove_btn)
+
+        # Botones de confirmación (ocultos por defecto)
+        manual_confirm_layout = QHBoxLayout()
+        manual_confirm_layout.setSpacing(5)
+
+        self.accept_btn = QPushButton("Aceptar")
+        self.accept_btn.clicked.connect(self._accept_preview)
+        self.accept_btn.setStyleSheet("padding: 8px; font-size: 11px; background-color: #4CAF50; color: white; font-weight: bold;")
+        self.accept_btn.hide()
+        manual_confirm_layout.addWidget(self.accept_btn)
+
+        self.revert_btn = QPushButton("Revertir")
+        self.revert_btn.clicked.connect(self._revert_preview)
+        self.revert_btn.setStyleSheet("padding: 8px; font-size: 11px; background-color: #f44336; color: white; font-weight: bold;")
+        self.revert_btn.hide()
+        manual_confirm_layout.addWidget(self.revert_btn)
+
+        seleccion_layout.addLayout(manual_confirm_layout)
 
         layout.addWidget(seleccion_group)
 
@@ -260,9 +293,22 @@ class SlideshowViewer(QDialog):
         self.zoom_hide_timer.timeout.connect(self._hide_zoom_overlay)
         self.zoom_hide_timer.setSingleShot(True)
 
+        # Label flotante para overlay de selección manual
+        self.manual_overlay_label = QLabel(scroll)
+        self.manual_overlay_label.setStyleSheet(
+            "background-color: rgba(33, 150, 243, 50); "
+            "border: 3px solid rgba(33, 150, 243, 200); "
+        )
+        self.manual_overlay_label.hide()
+        self.manual_overlay_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
         layout.addWidget(scroll, 1)
 
         self.scroll_area = scroll  # Guardar referencia para uso posterior
+
+        # Instalar event filter en image_label para capturar eventos de mouse
+        self.image_label.installEventFilter(self)
+
         return panel
 
     def _create_output_folder(self):
@@ -429,22 +475,33 @@ class SlideshowViewer(QDialog):
 
     def _apply_zoom(self):
         """Aplica el nivel de zoom actual a la imagen y dibuja overlays de marcas"""
-        if self.current_pixmap is None or self.current_pixmap.isNull():
-            return
+        # Si hay preview activo, usar preview_image en lugar de la original
+        if self.is_preview_active and self.preview_image is not None:
+            # Convertir numpy array a QPixmap
+            height, width = self.preview_image.shape[:2]
+            bytes_per_line = 3 * width
+            q_image = QImage(self.preview_image.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
+            q_image = q_image.rgbSwapped()  # OpenCV usa BGR, Qt usa RGB
+            pixmap_to_scale = QPixmap.fromImage(q_image)
+        else:
+            # Usar imagen original
+            if self.current_pixmap is None or self.current_pixmap.isNull():
+                return
+            pixmap_to_scale = self.current_pixmap
 
         # Calcular nuevo tamaño basado en zoom
         scale_factor = self.zoom_level / 100.0
-        new_size = self.current_pixmap.size() * scale_factor
+        new_size = pixmap_to_scale.size() * scale_factor
 
         # Escalar imagen
-        scaled_pixmap = self.current_pixmap.scaled(
+        scaled_pixmap = pixmap_to_scale.scaled(
             new_size,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation
         )
 
-        # Si hay posiciones de marcas de agua, dibujar cuadrados overlay
-        if self.watermark_positions and self.watermark_files:
+        # Si hay posiciones de marcas de agua y NO estamos en modo manual, dibujar overlays
+        if self.watermark_positions and self.watermark_files and not self.manual_mode_enabled:
             scaled_pixmap = self._draw_watermark_overlays(scaled_pixmap, scale_factor)
 
         self.image_label.setPixmap(scaled_pixmap)
@@ -731,6 +788,218 @@ class SlideshowViewer(QDialog):
 
         except Exception as e:
             self._log(f"❌ Error procesando marca de agua: {e}")
+
+    def eventFilter(self, watched, event):
+        """Filtro de eventos para capturar mouse en image_label"""
+        if watched == self.image_label and self.manual_mode_enabled:
+            if event.type() == QEvent.Type.MouseMove:
+                # Actualizar overlay siguiendo el cursor
+                self._update_manual_overlay(event.pos())
+                return False  # Propagar el evento
+
+            elif event.type() == QEvent.Type.MouseButtonPress:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    if self.is_preview_active:
+                        # Ya hay preview, aceptar cambios
+                        self._accept_preview()
+                    else:
+                        # No hay preview, crear uno
+                        self._remove_watermark_preview()
+                    return True  # Consumir evento
+
+                elif event.button() == Qt.MouseButton.RightButton:
+                    if self.is_preview_active:
+                        # Revertir preview
+                        self._revert_preview()
+                    return True  # Consumir evento
+
+        return super().eventFilter(watched, event)
+
+    def _toggle_manual_mode(self, state):
+        """Activa o desactiva el modo de selección manual"""
+        self.manual_mode_enabled = (state == Qt.CheckState.Checked.value)
+
+        if self.manual_mode_enabled:
+            # Activar modo manual
+            self.image_label.setMouseTracking(True)
+            self.manual_overlay_label.show()
+            self.remove_btn.show()
+            self._log("🔍 Modo selección manual activado")
+        else:
+            # Desactivar modo manual
+            self.image_label.setMouseTracking(False)
+            self.manual_overlay_label.hide()
+            self.remove_btn.hide()
+            self.accept_btn.hide()
+            self.revert_btn.hide()
+            # Limpiar estado
+            self.mouse_position = None
+            self.preview_image = None
+            self.is_preview_active = False
+            self._log("✅ Modo selección manual desactivado")
+            # Refrescar imagen
+            self._apply_zoom()
+
+    def _update_manual_overlay(self, pos):
+        """Actualiza la posición del overlay manual siguiendo el cursor"""
+        try:
+            # Obtener marca actual
+            current_watermark_index = self.watermark_combo.currentIndex()
+            if current_watermark_index < 0 or not self.watermark_files:
+                return
+
+            # Cargar marca para obtener dimensiones
+            watermark_file = self.watermark_files[current_watermark_index]
+            watermark_cv = load_images_cv2(watermark_file)
+            if watermark_cv is None:
+                return
+
+            wm_height, wm_width = watermark_cv.shape[:2]
+
+            # Aplicar escala de zoom
+            scale_factor = self.zoom_level / 100.0
+            scaled_width = int(wm_width * scale_factor)
+            scaled_height = int(wm_height * scale_factor)
+
+            # Convertir posición a coordenadas del scroll area
+            scroll_pos = self.scroll_area.mapFromGlobal(self.image_label.mapToGlobal(pos))
+
+            # Centrar overlay en cursor
+            overlay_x = scroll_pos.x() - scaled_width // 2
+            overlay_y = scroll_pos.y() - scaled_height // 2
+
+            # Posicionar overlay
+            self.manual_overlay_label.setGeometry(overlay_x, overlay_y, scaled_width, scaled_height)
+            self.manual_overlay_label.raise_()
+
+            # Guardar coordenadas originales (sin escala, con scroll) para procesamiento
+            image_x = pos.x() + self.scroll_area.horizontalScrollBar().value()
+            image_y = pos.y() + self.scroll_area.verticalScrollBar().value()
+            self.mouse_position = QPoint(int(image_x / scale_factor), int(image_y / scale_factor))
+
+        except Exception as e:
+            self._log(f"⚠️ Error actualizando overlay: {e}")
+
+    def _remove_watermark_preview(self):
+        """Crea un preview removiendo la marca de agua en la posición del cursor"""
+        if not self.mouse_position or not self.image_files:
+            self._log("⚠️ Posicione el cursor sobre la marca de agua primero")
+            return
+
+        try:
+            from WatermarkRemove.wm_remove import find_wm
+
+            # Obtener archivo actual
+            current_file = self.image_files[self.current_index]
+
+            # Obtener marca actual
+            current_watermark_index = self.watermark_combo.currentIndex()
+            if current_watermark_index < 0 or not self.watermark_files:
+                self._log("⚠️ Seleccione una marca de agua")
+                return
+
+            # Cargar imagen original
+            image = load_images_cv2(current_file)
+            if image is None:
+                self._log(f"❌ Error cargando imagen: {current_file.name}")
+                return
+
+            # Cargar marca de agua
+            watermark_file = self.watermark_files[current_watermark_index]
+            watermark = load_images_cv2(watermark_file)
+            if watermark is None:
+                self._log(f"❌ Error cargando marca de agua: {watermark_file.name}")
+                return
+
+            center_x = self.mouse_position.x()
+            center_y = self.mouse_position.y()
+            self._log(f"🔍 Buscando marca cerca de ({center_x}, {center_y})...")
+
+            # Usar find_wm para encontrar mejor posición
+            best_x, best_y = find_wm(
+                image,
+                watermark,
+                radio=140,
+                center_x=center_x,
+                center_y=center_y,
+                use_gpu=True
+            )
+
+            self._log(f"✅ Mejor coincidencia en ({best_x}, {best_y})")
+
+            # Remover marca de agua
+            result_image = remove_watermark(image, watermark, best_x, best_y)
+
+            # Guardar preview (NO en disco, solo en memoria)
+            self.preview_image = result_image
+            self.is_preview_active = True
+
+            # Actualizar UI
+            self.remove_btn.hide()
+            self.accept_btn.show()
+            self.revert_btn.show()
+
+            # Mostrar preview
+            self._apply_zoom()
+
+            self._log("👁️ Preview generado - Click izquierdo o 'Aceptar' para confirmar, Click derecho o 'Revertir' para descartar")
+
+        except Exception as e:
+            self._log(f"❌ Error en preview: {e}")
+            import traceback
+            self._log(traceback.format_exc())
+
+    def _accept_preview(self):
+        """Acepta el preview y guarda los cambios"""
+        if not self.is_preview_active or self.preview_image is None:
+            return
+
+        try:
+            # Guardar imagen procesada
+            current_file = self.image_files[self.current_index]
+            if not self.output_folder:
+                self._create_output_folder()
+
+            guardar(current_file, self.preview_image, self.output_folder)
+
+            # Marcar como procesada
+            self.processed_images.add(self.current_index)
+
+            self._log(f"✅ Cambios guardados en {current_file.name}")
+
+            # Limpiar preview
+            self.preview_image = None
+            self.is_preview_active = False
+
+            # Restaurar UI
+            self.accept_btn.hide()
+            self.revert_btn.hide()
+            self.remove_btn.show()
+
+            # Avanzar a siguiente imagen
+            self._next_image()
+
+        except Exception as e:
+            self._log(f"❌ Error guardando: {e}")
+
+    def _revert_preview(self):
+        """Revierte el preview y vuelve a la imagen original"""
+        if not self.is_preview_active:
+            return
+
+        # Limpiar preview
+        self.preview_image = None
+        self.is_preview_active = False
+
+        # Restaurar UI
+        self.accept_btn.hide()
+        self.revert_btn.hide()
+        self.remove_btn.show()
+
+        # Recargar imagen original
+        self._apply_zoom()
+
+        self._log("↩️ Preview descartado")
 
     def _finish_review(self):
         """Finaliza la revisión y permite continuar con el proceso"""
