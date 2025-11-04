@@ -91,37 +91,165 @@ def align_watermark(
     return x, y
 
 
-def find_wm_color(
-    image:np.ndarray, 
-    watermark:np.ndarray,
-    radio=140, 
-    rango=70
+def find_wm_gpu(
+    image: np.ndarray,
+    watermark: np.ndarray,
+    radio=140,
+    center_x=None,
+    center_y=None
     ):
-    """Encuentra la mejor alineación de la marca de agua minimizando la diferencia absoluta."""
+    """
+    Versión optimizada con GPU (OpenCL) para encontrar la marca de agua.
+    Mucho más rápido que la versión CPU.
+
+    Args:
+        image: Imagen donde buscar (RGB o RGBA)
+        watermark: Marca de agua con canal alpha
+        radio: Radio de búsqueda desde el centro
+        center_x: Coordenada X del centro (None = centro de imagen)
+        center_y: Coordenada Y del centro (None = centro de imagen)
+
+    Returns:
+        tuple: (best_x, best_y) o None si falla
+    """
+    try:
+        h_img, w_img = image.shape[:2]
+
+        # Usar coordenadas especificadas o el centro
+        centro_x = center_x if center_x is not None else w_img // 2
+        centro_y = center_y if center_y is not None else h_img // 2
+
+        # Extraer región de búsqueda de la imagen
+        search_x_start = max(0, centro_x - radio)
+        search_x_end = min(w_img, centro_x + radio)
+        search_y_start = max(0, centro_y - radio)
+        search_y_end = min(h_img, centro_y + radio)
+
+        search_region = image[search_y_start:search_y_end, search_x_start:search_x_end]
+
+        # Preparar marca de agua para template matching
+        # Usar solo RGB, el alpha lo usaremos como máscara después
+        wm_rgb = watermark[:, :, :3]
+        wm_alpha = watermark[:, :, 3]
+
+        # Crear máscara donde la marca es visible
+        mask = (wm_alpha > 25).astype(np.uint8) * 255
+
+        # Transferir a GPU (UMat)
+        search_region_gpu = cv2.UMat(search_region)
+        wm_rgb_gpu = cv2.UMat(wm_rgb)
+        mask_gpu = cv2.UMat(mask)
+
+        # Template matching en GPU con máscara
+        result = cv2.matchTemplate(search_region_gpu, wm_rgb_gpu, cv2.TM_SQDIFF, mask=mask_gpu)
+
+        # Traer resultado a CPU
+        result_cpu = result.get()
+
+        # Encontrar mínimo (mejor coincidencia con SQDIFF)
+        _, _, min_loc, _ = cv2.minMaxLoc(result_cpu)
+
+        # Convertir coordenadas locales a coordenadas globales
+        best_x = search_x_start + min_loc[0]
+        best_y = search_y_start + min_loc[1]
+
+        return best_x, best_y
+
+    except Exception as e:
+        print(f"Error en find_wm_gpu: {e}")
+        return None
+
+
+def find_wm(
+    image:np.ndarray,
+    watermark:np.ndarray,
+    radio=140,
+    center_x=None,
+    center_y=None,
+    use_gpu=True
+    ):
+    """
+    Encuentra la mejor alineación de la marca de agua.
+
+    Intenta usar GPU (OpenCL) primero para mayor velocidad. Si falla o no está
+    disponible, usa implementación CPU.
+
+    Args:
+        image: Imagen donde buscar la marca de agua
+        watermark: Marca de agua a buscar (debe tener canal alpha)
+        radio: Radio de búsqueda desde el centro (define el área: centro±radio)
+        center_x: Coordenada X del centro de búsqueda (None = centro de imagen)
+        center_y: Coordenada Y del centro de búsqueda (None = centro de imagen)
+        use_gpu: Intentar usar GPU si está disponible (default: True)
+
+    Returns:
+        tuple: (best_x, best_y) coordenadas donde se encontró la mejor coincidencia
+    """
+    # Intentar versión GPU primero si está habilitado
+    if use_gpu and cv2.ocl.haveOpenCL():
+        result = find_wm_gpu(image, watermark, radio, center_x, center_y)
+        if result is not None:
+            return result
+        # Si falla, continuar con CPU
+
+    # Versión CPU (fallback)
     h_img, w_img, _ = image.shape
     h_wm, w_wm, _ = watermark.shape
 
     best_x, best_y = 0, 0
     min_diff = float("inf")
 
-    alpha_wm = watermark[:, :, 3] / 255.0  
-    centro_x = w_img // 2
-    centro_y = h_img // 2
-    rango_x = [centro_x-radio, centro_x-rango]
-    rango_y = [centro_y-radio, centro_y-rango]
+    # Usar coordenadas especificadas o el centro de la imagen
+    centro_x = center_x if center_x is not None else w_img // 2
+    centro_y = center_y if center_y is not None else h_img // 2
 
-    for y in range(*rango_y):  
-        for x in range(*rango_x):  
-            roi = image[y:y+h_wm, x:x+w_wm, :3]  
-            visible_mask = alpha_wm > 0.1  
-            if np.sum(visible_mask) < (0.05 * visible_mask.size):  
-                continue  
+    # Calcular límites del área de búsqueda (cuadrado alrededor del centro)
+    search_x_start = centro_x - radio
+    search_x_end = centro_x + radio
+    search_y_start = centro_y - radio
+    search_y_end = centro_y + radio
 
-            diff = np.abs(roi.astype(np.int16) - watermark[:, :, :3].astype(np.int16))
-            total_diff = np.sum(diff[visible_mask])  
+    # Buscar pixel por pixel: de arriba a abajo, de izquierda a derecha
+    for y in range(search_y_start, search_y_end):
+        for x in range(search_x_start, search_x_end):
+            # Calcular la región de la marca de agua que se superpone con la imagen
+            wm_y_start = max(0, -y)
+            wm_x_start = max(0, -x)
+            wm_y_end = min(h_wm, h_img - y)
+            wm_x_end = min(w_wm, w_img - x)
 
-            if total_diff < min_diff:
-                min_diff = total_diff
+            # Calcular la región de la imagen correspondiente
+            img_y_start = max(0, y)
+            img_x_start = max(0, x)
+            img_y_end = min(h_img, y + h_wm)
+            img_x_end = min(w_img, x + w_wm)
+
+            # Verificar que haya superposición válida
+            if wm_y_end <= wm_y_start or wm_x_end <= wm_x_start:
+                continue
+            if img_y_end <= img_y_start or img_x_end <= img_x_start:
+                continue
+
+            # Extraer regiones superpuestas
+            roi = image[img_y_start:img_y_end, img_x_start:img_x_end, :3]
+            wm_region = watermark[wm_y_start:wm_y_end, wm_x_start:wm_x_end, :3]
+            wm_alpha = watermark[wm_y_start:wm_y_end, wm_x_start:wm_x_end, 3] / 255.0
+
+            visible_mask = wm_alpha > 0.1
+            num_visible_pixels = np.sum(visible_mask)
+
+            # Requerir al menos 30% de la marca visible para considerar válida
+            if num_visible_pixels < (0.3 * visible_mask.size):
+                continue
+
+            diff = np.abs(roi.astype(np.int16) - wm_region.astype(np.int16))
+            total_diff = np.sum(diff[visible_mask])
+
+            # Normalizar por cantidad de píxeles para evitar que áreas pequeñas ganen
+            avg_diff = total_diff / num_visible_pixels if num_visible_pixels > 0 else float('inf')
+
+            if avg_diff < min_diff:
+                min_diff = avg_diff
                 best_x, best_y = x, y
 
     return best_x, best_y
@@ -416,18 +544,24 @@ def load_positions(site_name: str = 'newtoki', position: str = 'pos_1') -> dict:
 
 
 if __name__ == "__main__":
+    import time
+    inicio = time.time()
     def mostrar(img):
         cv2.imshow('Mi Imagen', img)
         cv2.waitKey(0)  # Espera hasta que presiones una tecla
         cv2.destroyAllWindows()
 
-
-    img = load_images_cv2(r'c:\Users\Felix\Downloads\Image Picka\32 urek\1 - CiEhJNkTQMXF.jpg')
-    wm = load_images_cv2(r'c:\Users\Felix\Desktop\Python\watermark\SmartStitch\marcas\468 V2\color.png')
-
-    # Cargar posiciones usando la función helper
-    pos = load_positions('newtoki', 'pos_4')
-    coor = align_watermark(img, wm, **pos)
-    img_wmr = remove_watermark(img, wm, *coor)
-
+    #marca al 90%
+    img = load_images_cv2(r'c:\Users\Felix\Downloads\Image Picka\20 Ilegitimo [sin marca]\14 - 2rFp4RkcByVx.jpg')
+    wm = load_images_cv2(r'c:\Users\Felix\Desktop\Newtoki469grisOscuro.png')
+    elapsed = time.time() - inicio
+    print(f"Imagen cargada en: {elapsed:.2f}s")
+    
+    coor = find_wm(img, wm, center_x=580, center_y=310)
+    elapsed = time.time() - inicio
+    print(f"Marca encontrada en {coor}: {elapsed:.2f}s")
+ 
+    img_wmr = remove_watermark(img, wm, *coor, apply_jpeg_filter=False)
+    elapsed = time.time() - inicio
+    print(f"Marca removida en: {elapsed:.2f}s")
     mostrar(img_wmr)

@@ -20,7 +20,7 @@ from .wm_remove import (
     load_images_cv2,
     align_watermark,
     remove_watermark,
-    find_wm_color,
+    find_wm,
     generar_mascara_watermark,
     guardar,
     cargar_lotes_imagenes
@@ -34,7 +34,7 @@ __all__ = [
     'load_images_cv2',
     'align_watermark',
     'remove_watermark',
-    'find_wm_color',
+    'find_wm',
     'generar_mascara_watermark',
     'guardar',
     'cargar_lotes_imagenes'
