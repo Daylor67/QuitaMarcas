@@ -5,8 +5,8 @@ import os
 import sys
 from pathlib import Path
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
-    QScrollArea, QGraphicsOpacityEffect, QComboBox, QGroupBox
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, QGridLayout,
+    QScrollArea, QGraphicsOpacityEffect, QComboBox, QGroupBox, QCheckBox
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QRect
 from PySide6.QtGui import QPixmap, QKeyEvent, QWheelEvent, QPainter, QPen, QColor, QMouseEvent, QImage
@@ -126,95 +126,100 @@ class SlideshowViewer(QDialog):
         layout.setSpacing(10)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Información de carpeta
-        info_group = QWidget()
+        # Información de carpeta  ////////////////////////////////////////
+        info_group = QGroupBox("ℹ️ Info")
         info_layout = QVBoxLayout(info_group)
         info_layout.setSpacing(5)
 
-        info_layout.addWidget(QLabel("📁 Carpeta:"))
+        info_layout.addWidget(QLabel("Carpeta:"))
         self.folder_label = QLabel()
-        self.folder_label.setStyleSheet("color: #666; font-size: 10px; padding-left: 10px;")
+        self.folder_label.setStyleSheet("color: #999999; font-size: 10px; padding-left: 10px;")
         self.folder_label.setWordWrap(True)
+        self.folder_label.setMaximumHeight(60)  # Limitar altura
         info_layout.addWidget(self.folder_label)
 
         if self.folder_path:
             self.folder_label.setText(str(self.folder_path))
 
-        layout.addWidget(info_group)
-
         # Contador de imágenes
+        info_layout.addWidget(QLabel("Imagen:"))
         self.counter_label = QLabel("0 / 0")
-        self.counter_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.counter_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #2196F3; padding: 15px;")
-        layout.addWidget(self.counter_label)
+        self.counter_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.counter_label.setStyleSheet("font-size: 15px; font-weight: bold; color: #2196F3; padding: 5px;")
+        info_layout.addWidget(self.counter_label)
 
         # Nombre del archivo actual
         self.filename_label = QLabel("Sin archivo")
         self.filename_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.filename_label.setStyleSheet("font-size: 12px; color: #888; padding: 10px; background-color: #1e1e1e; border-radius: 5px;")
         self.filename_label.setWordWrap(True)
-        layout.addWidget(self.filename_label)
+        self.filename_label.setMaximumHeight(60)  # Limitar altura
+        info_layout.addWidget(self.filename_label)
 
-        # Espaciador
-        layout.addStretch()
-        
-        # Carpetas
-        folders_group = QGroupBox("📁 Selección")
-        folders_layout = QVBoxLayout()
-        folders_layout.setSpacing(6)
+        layout.addWidget(info_group)
+
+        # Carpetas  ////////////////////////////////////////
+        seleccion_group = QGroupBox("📁 Selección")
+        seleccion_layout = QVBoxLayout(seleccion_group)
+        seleccion_layout.setSpacing(5)
 
         # Selector de carpeta de marcas (desde WatermarkRemove/marcas)
-        folders_layout.addWidget(QLabel("Carpeta de Marcas:"))
+        seleccion_layout.addWidget(QLabel("Carpeta de Marcas:"))
         self.watermark_folder_combo = QComboBox()
+        self.watermark_folder_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.watermark_folder_combo.currentIndexChanged.connect(self._on_watermark_folder_changed)
-        folders_layout.addWidget(self.watermark_folder_combo)
+        seleccion_layout.addWidget(self.watermark_folder_combo)
 
         # Selector de marca individual dentro de la carpeta
-        folders_layout.addWidget(QLabel("Marca específica:"))
+        seleccion_layout.addWidget(QLabel("Marca específica:"))
         self.watermark_combo = QComboBox()
+        self.watermark_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.watermark_combo.currentIndexChanged.connect(self._on_watermark_changed)
-        folders_layout.addWidget(self.watermark_combo)
+        seleccion_layout.addWidget(self.watermark_combo)
 
         # Cargar las carpetas de marcas disponibles
         self._load_watermark_folders()
 
-        folders_group.setLayout(folders_layout)
-        layout.addWidget(folders_group)
-        
-        # Espaciador
-        layout.addStretch()
+        # Checkbox opciones avanzadas
+        opciones_avanzadas = QCheckBox("Opciones avanzadas")
+        seleccion_layout.addWidget(opciones_avanzadas)
 
-        # Botones de navegación
-        nav_layout = QVBoxLayout()
-        nav_layout.setSpacing(8)
+        layout.addWidget(seleccion_group)
 
+        # Botones de navegación y acción en cuadrícula 2x2 ////////////////////////////////////////
+        nav_group = QGroupBox("✳️ Navegación")
+        grid_layout = QGridLayout(nav_group)
+        grid_layout.setSpacing(5)  # Reducir espacio entre botones
+
+        # Fila 1: Navegación
         self.prev_btn = QPushButton("Anterior")
         self.prev_btn.clicked.connect(self._previous_image)
         self.prev_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #555; color: white;")
-        nav_layout.addWidget(self.prev_btn)
+        self.prev_btn.setMaximumHeight(40)  # Altura fija
+        grid_layout.addWidget(self.prev_btn, 0, 0)  # Fila 0, Columna 0
 
         self.next_btn = QPushButton("Siguiente")
         self.next_btn.clicked.connect(self._next_image)
         self.next_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #4CAF50; color: white; font-weight: bold;")
-        nav_layout.addWidget(self.next_btn)
+        self.next_btn.setMaximumHeight(40)  # Altura fija
+        grid_layout.addWidget(self.next_btn, 0, 1)  # Fila 0, Columna 1
 
-        layout.addLayout(nav_layout)
-
-        # Botones de acción
-        action_layout = QVBoxLayout()
-        action_layout.setSpacing(8)
-
+        # Fila 2: Acción
         self.finish_btn = QPushButton("Finalizar y Procesar")
         self.finish_btn.clicked.connect(self._finish_review)
-        self.finish_btn.setStyleSheet("padding: 12px; font-size: 12px; background-color: #2196F3; color: white; font-weight: bold;")
-        action_layout.addWidget(self.finish_btn)
+        self.finish_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #2196F3; color: white; font-weight: bold;")
+        self.finish_btn.setMaximumHeight(40)  # Altura fija
+        grid_layout.addWidget(self.finish_btn, 1, 0)  # Fila 1, Columna 0
 
         self.cancel_btn = QPushButton("Cancelar")
         self.cancel_btn.clicked.connect(self._cancel_review)
         self.cancel_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #f44336; color: white;")
-        action_layout.addWidget(self.cancel_btn)
+        self.cancel_btn.setMaximumHeight(40)  # Altura fija
+        grid_layout.addWidget(self.cancel_btn, 1, 1)  # Fila 1, Columna 1
 
-        layout.addLayout(action_layout)
+        layout.addWidget(nav_group)
+
+        layout.addStretch(1)
 
         return panel
 
