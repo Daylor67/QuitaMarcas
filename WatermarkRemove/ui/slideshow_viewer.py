@@ -706,7 +706,11 @@ class SlideshowViewer(QDialog):
             self.counter_label.setText("0 / 0")
 
     def _next_image(self):
-        """Avanza a la siguiente imagen"""
+        """Avanza a la siguiente imagen, guardando la actual si no fue procesada"""
+        # Guardar la imagen actual si no ha sido procesada (sin marcas removidas)
+        if self.current_index not in self.processed_images:
+            self._save_current_image_as_is()
+
         if self.current_index < len(self.image_files) - 1:
             self.current_index += 1
             self._show_current_image()
@@ -719,6 +723,31 @@ class SlideshowViewer(QDialog):
         if self.current_index > 0:
             self.current_index -= 1
             self._show_current_image()
+
+    def _save_current_image_as_is(self):
+        """Guarda la imagen actual sin modificaciones (cuando no se removió ninguna marca)"""
+        if not self.output_folder or not self.image_files:
+            return
+
+        try:
+            current_file = self.image_files[self.current_index]
+
+            # Cargar imagen original con OpenCV
+            image = load_images_cv2(current_file)
+            if image is None:
+                self._log(f"⚠️ Error cargando imagen: {current_file.name}")
+                return
+
+            # Guardar la imagen sin modificaciones
+            guardar(current_file, image, self.output_folder)
+
+            # Marcar como procesada
+            self.processed_images.add(self.current_index)
+
+            self._log(f"💾 Imagen guardada sin cambios: {current_file.name}")
+
+        except Exception as e:
+            self._log(f"❌ Error guardando imagen: {e}")
 
     def _process_watermark_at_position(self, pos_name: str, rect_data: dict, is_cumulative: bool = False):
         """
@@ -889,10 +918,11 @@ class SlideshowViewer(QDialog):
             self.manual_overlay_label.setGeometry(overlay_x, overlay_y, scaled_width, scaled_height)
             self.manual_overlay_label.raise_()
 
-            # Guardar coordenadas originales (sin escala, con scroll) para procesamiento
-            image_x = pos.x() + self.scroll_area.horizontalScrollBar().value()
-            image_y = pos.y() + self.scroll_area.verticalScrollBar().value()
-            self.mouse_position = QPoint(int(image_x / scale_factor), int(image_y / scale_factor))
+            # Guardar coordenadas originales de la imagen (sin escala de zoom)
+            # pos es relativo al image_label escalado, dividir por scale_factor para obtener coordenadas reales
+            image_x = int(pos.x() / scale_factor)
+            image_y = int(pos.y() / scale_factor)
+            self.mouse_position = QPoint(image_x, image_y)
 
         except Exception as e:
             self._log(f"⚠️ Error actualizando overlay: {e}")
