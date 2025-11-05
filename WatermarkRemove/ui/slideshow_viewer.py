@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, QGridLayout,
-    QScrollArea, QGraphicsOpacityEffect, QComboBox, QGroupBox, QCheckBox
+    QScrollArea, QComboBox, QGroupBox, QCheckBox, QDoubleSpinBox
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QRect, QEvent, QPoint
 from PySide6.QtGui import QPixmap, QKeyEvent, QWheelEvent, QPainter, QPen, QColor, QMouseEvent, QImage
@@ -191,6 +191,19 @@ class SlideshowViewer(QDialog):
         self.opciones_avanzadas = QCheckBox("Modo selección manual")
         self.opciones_avanzadas.stateChanged.connect(self._toggle_manual_mode)
         seleccion_layout.addWidget(self.opciones_avanzadas)
+
+        self.label_alpha_adj = QLabel("Alpha adjust:")
+        seleccion_layout.addWidget(self.label_alpha_adj)
+        self.label_alpha_adj.hide()
+        
+        self.alpha_adjust = QDoubleSpinBox()
+        self.alpha_adjust.setRange(0.5, 1.5)
+        self.alpha_adjust.setValue(1.0)
+        self.alpha_adjust.setSingleStep(0.01)  # Incremento de 0.01 (centésimas)
+        self.alpha_adjust.setDecimals(2)  # Mostrar 2 decimales
+        self.alpha_adjust.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.alpha_adjust.hide()
+        seleccion_layout.addWidget(self.alpha_adjust)
 
         # Botones de modo manual (ocultos por defecto)
         self.remove_btn = QPushButton("Remover marca")
@@ -764,7 +777,7 @@ class SlideshowViewer(QDialog):
             )
 
             # Aplicar remove_watermark
-            result_image = remove_watermark(image, watermark, x, y)
+            result_image = remove_watermark(image, watermark, x, y, alpha_adjust=self.alpha_adjust.value())
 
             # Guardar la imagen procesada en la carpeta de salida (soporte Unicode)
             guardar(current_file, result_image, self.output_folder)
@@ -823,12 +836,16 @@ class SlideshowViewer(QDialog):
             # Activar modo manual
             self.image_label.setMouseTracking(True)
             self.manual_overlay_label.show()
+            self.alpha_adjust.show()
+            self.label_alpha_adj.show()
             self.remove_btn.show()
             self._log("🔍 Modo selección manual activado")
         else:
             # Desactivar modo manual
             self.image_label.setMouseTracking(False)
             self.manual_overlay_label.hide()
+            self.alpha_adjust.hide()
+            self.label_alpha_adj.hide()
             self.remove_btn.hide()
             self.accept_btn.hide()
             self.revert_btn.hide()
@@ -928,7 +945,7 @@ class SlideshowViewer(QDialog):
             self._log(f"✅ Mejor coincidencia en ({best_x}, {best_y})")
 
             # Remover marca de agua
-            result_image = remove_watermark(image, watermark, best_x, best_y)
+            result_image = remove_watermark(image, watermark, best_x, best_y, alpha_adjust=self.alpha_adjust.value())
 
             # Guardar preview (NO en disco, solo en memoria)
             self.preview_image = result_image
