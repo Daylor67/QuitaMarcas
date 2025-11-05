@@ -1111,10 +1111,10 @@ class SlideshowViewer(QDialog):
             self._next_image()
         elif key == Qt.Key.Key_Backspace:
             self._previous_image()
-        elif key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
-            self._finish_review()
-        elif key == Qt.Key.Key_Escape:
-            self._cancel_review()
+        # elif key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
+        #     self._finish_review()
+        # elif key == Qt.Key.Key_Escape:
+        #     self._cancel_review()
         else:
             super().keyPressEvent(event)
 

@@ -54,6 +54,7 @@ class WatermarkTab(QWidget):
         self.view_images_btn = QPushButton("Ver Imágenes de Input")
         self.view_images_btn.setStyleSheet("padding: 8px; color: white;")
         self.view_images_btn.clicked.connect(self._open_image_viewer)
+        self.view_images_btn.hide()
         settings_layout.addWidget(self.view_images_btn)
 
         # Botón para abrir editor de posiciones
