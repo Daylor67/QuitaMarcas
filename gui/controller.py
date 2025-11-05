@@ -349,15 +349,22 @@ def check_for_updates():
             has_update, latest_version, download_url, release_notes = updater.check_for_updates()
 
             if has_update and download_url:
-                # Mostrar diálogo de actualización
-                dialog = UpdateDialog(
-                    MainWindow,
-                    APP_VERSION,
-                    latest_version,
-                    download_url,
-                    release_notes
-                )
-                dialog.exec()
+                # Verificar si el usuario ya rechazó esta versión anteriormente
+                skipped_version = settings.current_settings.__dict__.get("skipped_update_version", "")
+
+                # Solo mostrar el diálogo si es una versión diferente a la rechazada
+                if skipped_version != latest_version:
+                    # Mostrar diálogo de actualización
+                    dialog = UpdateDialog(
+                        MainWindow,
+                        APP_VERSION,
+                        latest_version,
+                        download_url,
+                        release_notes
+                    )
+                    dialog.exec()
+                else:
+                    print(f"Actualización v{latest_version} fue rechazada previamente. No se mostrará el diálogo.")
 
         # Verificar actualizaciones 2 segundos después de que se muestre la ventana
         QTimer.singleShot(2000, do_check)

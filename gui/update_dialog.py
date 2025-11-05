@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont
 
 from core.services.update_checker import UpdateChecker
+from core.services import SettingsHandler
 
 
 class DownloadThread(QThread):
@@ -48,6 +49,7 @@ class UpdateDialog(QDialog):
         self.release_notes = release_notes
         self.updater = UpdateChecker()
         self.download_thread = None
+        self.settings = SettingsHandler()
 
         self.init_ui()
 
@@ -103,7 +105,7 @@ class UpdateDialog(QDialog):
         button_layout.addStretch()
 
         self.later_button = QPushButton("Más tarde")
-        self.later_button.clicked.connect(self.reject)
+        self.later_button.clicked.connect(self.on_later_clicked)
         button_layout.addWidget(self.later_button)
 
         self.update_button = QPushButton("Actualizar ahora")
@@ -114,6 +116,11 @@ class UpdateDialog(QDialog):
         layout.addLayout(button_layout)
 
         self.setLayout(layout)
+
+    def on_later_clicked(self):
+        """Guarda la versión rechazada y cierra el diálogo"""
+        self.settings.save("skipped_update_version", self.latest_version)
+        self.reject()
 
     def start_update(self):
         """Inicia la descarga de la actualización"""
@@ -147,6 +154,9 @@ class UpdateDialog(QDialog):
         """Llamado cuando la descarga termina"""
         self.status_label.setText("Descarga completada. Aplicando actualización...")
         self.progress_bar.setVisible(False)
+
+        # Limpiar la versión rechazada ya que el usuario decidió actualizar
+        self.settings.save("skipped_update_version", "")
 
         # Aplicar actualización
         if self.updater.apply_update(zip_path):
