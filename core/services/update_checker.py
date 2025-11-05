@@ -31,6 +31,11 @@ class UpdateChecker:
             tuple: (has_update: bool, latest_version: str, download_url: str, release_notes: str)
         """
         try:
+            # Solo buscar actualizaciones en Windows (donde hay ejecutable compilado)
+            if sys.platform != "win32":
+                print("Auto-actualización solo disponible en Windows")
+                return False, None, None, None
+
             # Hacer petición a la API de GitHub
             req = Request(GITHUB_API_URL)
             req.add_header('Accept', 'application/vnd.github.v3+json')

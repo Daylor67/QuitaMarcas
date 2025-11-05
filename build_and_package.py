@@ -67,8 +67,9 @@ def main():
         for root, dirs, files in os.walk(new_folder_path):
             for file in files:
                 file_path = Path(root) / file
-                # Calcular ruta relativa dentro del ZIP
-                arcname = file_path.relative_to(build_dir)
+                # Calcular ruta relativa DESDE la carpeta, no desde build/
+                # Esto pone los archivos directamente en la raíz del ZIP
+                arcname = file_path.relative_to(new_folder_path)
                 zipf.write(file_path, arcname)
 
     file_size_mb = zip_path.stat().st_size / (1024 * 1024)
