@@ -82,7 +82,7 @@ class UpdateDialog(QDialog):
 
         self.notes_text = QTextEdit()
         self.notes_text.setReadOnly(True)
-        self.notes_text.setPlainText(self.release_notes)
+        self.notes_text.setMarkdown(self.release_notes)
         self.notes_text.setMaximumHeight(200)
         layout.addWidget(self.notes_text)
 
