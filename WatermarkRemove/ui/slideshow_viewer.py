@@ -4,6 +4,7 @@ Visor de imágenes tipo slideshow - Navega con Space y Backspace
 import os
 import sys
 from pathlib import Path
+from typing import Tuple, Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, QGridLayout,
     QScrollArea, QComboBox, QGroupBox, QCheckBox, QDoubleSpinBox
@@ -21,8 +22,7 @@ from utils import UtilJson
 import numpy as np
 from natsort import natsorted
 from WatermarkRemove import align_watermark, remove_watermark
-from WatermarkRemove.wm_remove import load_images_cv2, guardar
-
+from WatermarkRemove.wm_remove import load_images_cv2, guardar, find_wm
 
 class SlideshowViewer(QDialog):
     """
@@ -80,6 +80,17 @@ class SlideshowViewer(QDialog):
         self.mouse_position = None  # Posición actual del cursor (QPoint)
         self.preview_image = None  # Imagen con marca removida (temporal, numpy array)
         self.is_preview_active = False  # Si hay un preview activo esperando confirmación
+
+        # Sistema de eventos atómicos para remoción de marcas
+        self.current_event_position: Optional[Tuple[int, int]] = None  # Coordenadas del click del evento actual (best_x, best_y)
+        self.current_event_watermark_index: Optional[int] = None  # Índice de la marca de agua usada en el evento actual
+        self.base_image_for_preview: Optional[np.ndarray] = None  # Imagen base para el sub-evento actual
+
+        # Imagen de trabajo en memoria (fuente de verdad para edición)
+        self.working_image: Optional[np.ndarray] = None
+
+        # Alpha por marca de agua (índice -> valor alpha)
+        self.watermark_alpha_values: dict = {}  # {0: 1.0, 1: 1.5, ...}
 
         self._setup_ui()
         self._load_image_list()
@@ -197,11 +208,12 @@ class SlideshowViewer(QDialog):
         self.label_alpha_adj.hide()
         
         self.alpha_adjust = QDoubleSpinBox()
-        self.alpha_adjust.setRange(0.5, 1.5)
+        self.alpha_adjust.setRange(0.1, 2)
         self.alpha_adjust.setValue(1.0)
         self.alpha_adjust.setSingleStep(0.01)  # Incremento de 0.01 (centésimas)
         self.alpha_adjust.setDecimals(2)  # Mostrar 2 decimales
         self.alpha_adjust.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.alpha_adjust.valueChanged.connect(self._on_alpha_changed)  # Conectar para recalcular preview en tiempo real
         self.alpha_adjust.hide()
         seleccion_layout.addWidget(self.alpha_adjust)
 
@@ -354,12 +366,16 @@ class SlideshowViewer(QDialog):
 
     def _load_watermark_folders(self):
         """Carga las carpetas disponibles en WatermarkRemove/marcas"""
+        # Bloquear señales para evitar que se dispare _on_watermark_folder_changed durante la carga
+        self.watermark_folder_combo.blockSignals(True)
+
         self.watermark_folder_combo.clear()
 
         wm_dir = os.path.dirname(current_dir)
         marcas_base_path = Path(wm_dir) / 'marcas'
 
         if not marcas_base_path.exists():
+            self.watermark_folder_combo.blockSignals(False)
             return
 
         # Obtener subcarpetas ordenadas (más recientes primero)
@@ -370,18 +386,30 @@ class SlideshowViewer(QDialog):
         for folder in folders:
             self.watermark_folder_combo.addItem(folder.name, str(folder))
 
-        # Si se proporcionó una carpeta inicial, seleccionarla
+        # Determinar qué carpeta seleccionar
         if self.watermark_folder:
-            index = self.watermark_folder_combo.findText(self.watermark_name)
+            # Si se proporcionó una carpeta inicial, usarla
+            folder_to_select = self.watermark_name
+        else:
+            # Usar la última carpeta guardada en settings
+            folder_to_select = UtilJson('__settings__/settings.json').get('last_watermark_folder', None)
+
+        if folder_to_select:
+            index = self.watermark_folder_combo.findText(folder_to_select)
             if index >= 0:
                 self.watermark_folder_combo.setCurrentIndex(index)
+
+        # Restaurar señales
+        self.watermark_folder_combo.blockSignals(False)
+
+        # Disparar manualmente para inicializar el estado
+        self._on_watermark_folder_changed(self.watermark_folder_combo.currentIndex())
 
     def _on_watermark_folder_changed(self, index):
         """Callback cuando cambia la carpeta de marcas seleccionada"""
         if index < 0:
             return
 
-        # Obtener la ruta de la carpeta seleccionada
         folder_path = self.watermark_folder_combo.currentData()
         folder_name = self.watermark_folder_combo.currentText()
         if folder_path:
@@ -389,6 +417,9 @@ class SlideshowViewer(QDialog):
             self.watermark_name = folder_name  # Actualizar el nombre
             self._load_watermarks_into_combo()
             self._load_watermark_positions()
+
+            # Guardar como última carpeta usada
+            UtilJson('__settings__/settings.json').set('last_watermark_folder', folder_name)
 
             # Crear carpeta de salida si aún no existe
             if not self.output_folder and self.folder_path:
@@ -415,6 +446,12 @@ class SlideshowViewer(QDialog):
     def _on_watermark_changed(self, index):
         """Callback cuando cambia la marca individual seleccionada"""
         if index >= 0:
+            # Cargar el alpha guardado para esta marca (o 1.0 por defecto)
+            saved_alpha = self.watermark_alpha_values.get(index, 1.0)
+            self.alpha_adjust.blockSignals(True)  # Evitar trigger de _on_alpha_changed
+            self.alpha_adjust.setValue(saved_alpha)
+            self.alpha_adjust.blockSignals(False)
+
             # Actualizar la visualización con los nuevos cuadrados
             self._show_current_image()
 
@@ -462,8 +499,20 @@ class SlideshowViewer(QDialog):
 
         current_file = self.image_files[self.current_index]
 
-        # Cargar imagen original
-        self.current_pixmap = QPixmap(str(current_file))
+        # Cargar working_image SOLO si no existe (primera vez en esta imagen)
+        if self.working_image is None:
+            self.working_image = load_images_cv2(current_file)
+
+        # Convertir working_image a QPixmap para mostrar
+        if self.working_image is not None:
+            height, width = self.working_image.shape[:2]
+            bytes_per_line = 3 * width
+            q_image = QImage(self.working_image.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
+            q_image = q_image.rgbSwapped()  # OpenCV usa BGR, Qt usa RGB
+            self.current_pixmap = QPixmap.fromImage(q_image)
+        else:
+            # Fallback a cargar desde disco si working_image falla
+            self.current_pixmap = QPixmap(str(current_file))
 
         if not self.current_pixmap.isNull():
             # Aplicar zoom
@@ -488,16 +537,23 @@ class SlideshowViewer(QDialog):
 
     def _apply_zoom(self):
         """Aplica el nivel de zoom actual a la imagen y dibuja overlays de marcas"""
-        # Si hay preview activo, usar preview_image en lugar de la original
+        # Prioridad: preview_image (sub-evento activo) > working_image (imagen editada) > current_pixmap
         if self.is_preview_active and self.preview_image is not None:
-            # Convertir numpy array a QPixmap
+            # Mostrar preview del sub-evento
             height, width = self.preview_image.shape[:2]
             bytes_per_line = 3 * width
             q_image = QImage(self.preview_image.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
             q_image = q_image.rgbSwapped()  # OpenCV usa BGR, Qt usa RGB
             pixmap_to_scale = QPixmap.fromImage(q_image)
+        elif self.working_image is not None:
+            # Mostrar imagen de trabajo (con sub-eventos previos aplicados)
+            height, width = self.working_image.shape[:2]
+            bytes_per_line = 3 * width
+            q_image = QImage(self.working_image.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
+            q_image = q_image.rgbSwapped()  # OpenCV usa BGR, Qt usa RGB
+            pixmap_to_scale = QPixmap.fromImage(q_image)
         else:
-            # Usar imagen original
+            # Fallback a pixmap original
             if self.current_pixmap is None or self.current_pixmap.isNull():
                 return
             pixmap_to_scale = self.current_pixmap
@@ -705,8 +761,20 @@ class SlideshowViewer(QDialog):
         else:
             self.counter_label.setText("0 / 0")
 
+    def _clear_image_memory(self):
+        """Limpia la imagen de memoria cuando se navega a otra imagen"""
+        self.working_image = None  # Limpiar imagen de trabajo
+        self.base_image_for_preview = None
+        self.current_event_position = None
+        self.current_event_watermark_index = None
+        self.preview_image = None
+        self.is_preview_active = False
+
     def _next_image(self):
         """Avanza a la siguiente imagen, guardando la actual si no fue procesada"""
+        # Limpiar memoria de eventos de la imagen actual
+        self._clear_image_memory()
+
         # Guardar la imagen actual si no ha sido procesada (sin marcas removidas)
         if self.current_index not in self.processed_images:
             self._save_current_image_as_is()
@@ -720,6 +788,9 @@ class SlideshowViewer(QDialog):
 
     def _previous_image(self):
         """Retrocede a la imagen anterior"""
+        # Limpiar memoria de eventos de la imagen actual
+        self._clear_image_memory()
+
         if self.current_index > 0:
             self.current_index -= 1
             self._show_current_image()
@@ -841,17 +912,14 @@ class SlideshowViewer(QDialog):
 
             elif event.type() == QEvent.Type.MouseButtonPress:
                 if event.button() == Qt.MouseButton.LeftButton:
-                    if self.is_preview_active:
-                        # Ya hay preview, aceptar cambios
-                        self._accept_preview()
-                    else:
-                        # No hay preview, crear uno
-                        self._remove_watermark_preview()
+                    # SIEMPRE añade marca (primera o adicional)
+                    # Usuario debe usar el botón "Aceptar" para confirmar
+                    self._remove_watermark_preview()
                     return True  # Consumir evento
 
                 elif event.button() == Qt.MouseButton.RightButton:
                     if self.is_preview_active:
-                        # Revertir preview
+                        # Revertir TODAS las marcas acumuladas
                         self._revert_preview()
                     return True  # Consumir evento
 
@@ -927,29 +995,69 @@ class SlideshowViewer(QDialog):
         except Exception as e:
             self._log(f"⚠️ Error actualizando overlay: {e}")
 
+    def _on_alpha_changed(self, value):
+        """Recalcula el preview cuando cambia el alpha y guarda el valor para la marca actual"""
+        # Guardar el alpha para la marca actual
+        current_index = self.watermark_combo.currentIndex()
+        if current_index >= 0:
+            self.watermark_alpha_values[current_index] = value
+
+        # Solo recalcular si hay evento activo
+        if not self.is_preview_active:
+            return
+
+        if self.current_event_position is None or self.current_event_watermark_index is None:
+            return
+
+        try:
+            # Recargar marca de agua
+            watermark_file = self.watermark_files[self.current_event_watermark_index]
+            watermark = load_images_cv2(watermark_file)
+
+            # Recalcular preview desde la base con nuevo alpha
+            best_x, best_y = self.current_event_position
+            self.preview_image = remove_watermark(
+                self.base_image_for_preview,  # Siempre desde la base
+                watermark,
+                best_x,
+                best_y,
+                alpha_adjust=value  # Nuevo valor de alpha
+            )
+
+            # Actualizar display
+            self._apply_zoom()
+
+        except Exception as e:
+            self._log(f"❌ Error recalculando preview: {e}")
+
     def _remove_watermark_preview(self):
-        """Crea un preview removiendo la marca de agua en la posición del cursor"""
+        """Crea un preview removiendo la marca de agua en la posición del cursor. Sistema de eventos atómicos."""
+        # Si ya hay un evento activo, IGNORAR (un evento = un solo click)
+        if self.is_preview_active:
+            self._log("⚠️ Ya hay un evento activo. Acepta o revierte primero.")
+            return
+
         if not self.mouse_position or not self.image_files:
             self._log("⚠️ Posicione el cursor sobre la marca de agua primero")
             return
 
         try:
-            from WatermarkRemove.wm_remove import find_wm
-
-            # Obtener archivo actual
-            current_file = self.image_files[self.current_index]
-
             # Obtener marca actual
             current_watermark_index = self.watermark_combo.currentIndex()
             if current_watermark_index < 0 or not self.watermark_files:
                 self._log("⚠️ Seleccione una marca de agua")
                 return
 
-            # Cargar imagen original
-            image = load_images_cv2(current_file)
-            if image is None:
-                self._log(f"❌ Error cargando imagen: {current_file.name}")
+            # Usar working_image como base (ya está en memoria)
+            if self.working_image is None:
+                self._log("❌ No hay imagen en memoria")
                 return
+
+            # Guardar base para este sub-evento
+            self.base_image_for_preview = self.working_image
+
+            # Guardar índice de marca actual
+            self.current_event_watermark_index = current_watermark_index
 
             # Cargar marca de agua
             watermark_file = self.watermark_files[current_watermark_index]
@@ -958,38 +1066,50 @@ class SlideshowViewer(QDialog):
                 self._log(f"❌ Error cargando marca de agua: {watermark_file.name}")
                 return
 
+            # Obtener coordenadas del mouse
             center_x = self.mouse_position.x()
             center_y = self.mouse_position.y()
             self._log(f"🔍 Buscando marca cerca de ({center_x}, {center_y})...")
 
-            # Usar find_wm para encontrar mejor posición
+            # Encontrar mejor posición
             best_x, best_y = find_wm(
-                image,
+                self.base_image_for_preview,
                 watermark,
                 radio=140,
                 center_x=center_x,
                 center_y=center_y,
                 use_gpu=True
             )
+            self.current_event_position = (best_x, best_y)
 
             self._log(f"✅ Mejor coincidencia en ({best_x}, {best_y})")
 
-            # Remover marca de agua
-            result_image = remove_watermark(image, watermark, best_x, best_y, alpha_adjust=self.alpha_adjust.value())
+            # Crear preview con alpha actual
+            self.preview_image = remove_watermark(
+                self.base_image_for_preview,
+                watermark,
+                best_x,
+                best_y,
+                alpha_adjust=self.alpha_adjust.value()
+            )
 
-            # Guardar preview (NO en disco, solo en memoria)
-            self.preview_image = result_image
+            # Activar evento
             self.is_preview_active = True
 
-            # Actualizar UI
+            # Bloquear UI
+            self.next_btn.setEnabled(False)
+            self.prev_btn.setEnabled(False)
+            self.watermark_combo.setEnabled(False)
+
+            # Mostrar botones
             self.remove_btn.hide()
             self.accept_btn.show()
             self.revert_btn.show()
 
-            # Mostrar preview
+            # Actualizar display
             self._apply_zoom()
 
-            self._log("👁️ Preview generado - Click izquierdo o 'Aceptar' para confirmar, Click derecho o 'Revertir' para descartar")
+            self._log(f"✅ Evento iniciado en ({best_x}, {best_y}) - Ajusta alpha si necesitas")
 
         except Exception as e:
             self._log(f"❌ Error en preview: {e}")
@@ -997,7 +1117,7 @@ class SlideshowViewer(QDialog):
             self._log(traceback.format_exc())
 
     def _accept_preview(self):
-        """Acepta el preview y guarda los cambios"""
+        """Acepta el preview y guarda los cambios. Sistema de eventos atómicos."""
         if not self.is_preview_active or self.preview_image is None:
             return
 
@@ -1007,46 +1127,67 @@ class SlideshowViewer(QDialog):
             if not self.output_folder:
                 self._create_output_folder()
 
-            guardar(current_file, self.preview_image, self.output_folder)
+            # CRÍTICO: Actualizar working_image con el preview aceptado
+            self.working_image = self.preview_image.copy()
+
+            # Guardar a disco
+            guardar(current_file, self.working_image, self.output_folder)
 
             # Marcar como procesada
             self.processed_images.add(self.current_index)
 
-            self._log(f"✅ Cambios guardados en {current_file.name}")
-
-            # Limpiar preview
+            # Limpiar state del sub-evento
+            self.base_image_for_preview = None
+            self.current_event_position = None
+            self.current_event_watermark_index = None
             self.preview_image = None
             self.is_preview_active = False
 
-            # Restaurar UI
+            # Restaurar controles UI
+            self.next_btn.setEnabled(True)
+            self.prev_btn.setEnabled(True)
+            self.watermark_combo.setEnabled(True)  # Desbloquear combo
+
+            # Restaurar botones
             self.accept_btn.hide()
             self.revert_btn.hide()
             self.remove_btn.show()
 
-            # Avanzar a siguiente imagen
-            self._next_image()
+            # Log
+            self._log(f"✅ Evento guardado en {current_file.name}")
+
+            # NO avanzar automáticamente - permitir al usuario seguir trabajando en la misma imagen
 
         except Exception as e:
             self._log(f"❌ Error guardando: {e}")
 
     def _revert_preview(self):
-        """Revierte el preview y vuelve a la imagen original"""
+        """Revierte el preview y vuelve al estado anterior. Sistema de eventos atómicos."""
         if not self.is_preview_active:
             return
 
-        # Limpiar preview
+        # Limpiar state del sub-evento (NO tocar working_image - mantener eventos previos)
+        self.base_image_for_preview = None
+        self.current_event_position = None
+        self.current_event_watermark_index = None
         self.preview_image = None
         self.is_preview_active = False
 
-        # Restaurar UI
+        # Restaurar controles UI
+        self.next_btn.setEnabled(True)
+        self.prev_btn.setEnabled(True)
+        self.watermark_combo.setEnabled(True)  # Desbloquear combo
+
+        # Restaurar botones
         self.accept_btn.hide()
         self.revert_btn.hide()
         self.remove_btn.show()
 
-        # Recargar imagen original
+        # Mostrar working_image (con sub-eventos previos aplicados)
         self._apply_zoom()
 
-        self._log("↩️ Preview descartado")
+        # Log
+        self._log(f"↩️ Evento descartado")
 
     def _finish_review(self):
         """Finaliza la revisión y permite continuar con el proceso"""
@@ -1137,10 +1278,17 @@ class SlideshowViewer(QDialog):
             return
 
         # Navegación normal
+        check_opc_avanzadas = self.opciones_avanzadas.isChecked()
         if key == Qt.Key.Key_Space:
-            self._next_image()
+            if check_opc_avanzadas and self.is_preview_active:
+                self._accept_preview()
+            else:
+                self._next_image()
         elif key == Qt.Key.Key_Backspace:
-            self._previous_image()
+            if check_opc_avanzadas and self.is_preview_active:
+                self._revert_preview()
+            else:
+                self._previous_image()
         # elif key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
         #     self._finish_review()
         # elif key == Qt.Key.Key_Escape:
