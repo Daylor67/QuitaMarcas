@@ -99,7 +99,7 @@ class SettingsHandler:
         if not os.path.exists(self.settings_file):
             return self.save_all()
         else:
-            with open(self.settings_file, "r") as f:
+            with open(self.settings_file, "r", encoding="utf-8") as f:
                 return AppProfiles(json.load(f))
 
     def save_all(self, profiles: AppProfiles = None):
@@ -108,6 +108,6 @@ class SettingsHandler:
             os.makedirs(SETTINGS_REL_DIR)
         if not (profiles):
             profiles = AppProfiles()
-        with open(self.settings_file, "w") as f:
+        with open(self.settings_file, "w", encoding="utf-8") as f:
             json.dump(vars(profiles), f, indent=2)
         return profiles

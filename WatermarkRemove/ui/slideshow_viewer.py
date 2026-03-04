@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Tuple, Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, QGridLayout,
-    QScrollArea, QComboBox, QGroupBox, QCheckBox, QDoubleSpinBox
+    QScrollArea, QComboBox, QGroupBox, QCheckBox, QDoubleSpinBox, QMessageBox
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QRect, QEvent, QPoint
 from PySide6.QtGui import QPixmap, QKeyEvent, QWheelEvent, QPainter, QPen, QColor, QMouseEvent, QImage
@@ -1158,6 +1158,9 @@ class SlideshowViewer(QDialog):
 
             # NO avanzar automáticamente - permitir al usuario seguir trabajando en la misma imagen
 
+            # Devolver foco al widget principal para que Space active keyPressEvent en vez del botón
+            self.setFocus()
+
         except Exception as e:
             self._log(f"❌ Error guardando: {e}")
 
@@ -1191,12 +1194,26 @@ class SlideshowViewer(QDialog):
 
     def _finish_review(self):
         """Finaliza la revisión y permite continuar con el proceso"""
+        reply = QMessageBox.question(
+            self, "Finalizar revisión",
+            "¿Seguro que quieres finalizar y procesar las imágenes?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
         self.user_approved = True
         self.review_completed.emit(True)
         self.accept()
 
     def _cancel_review(self):
         """Cancela la revisión y el proceso"""
+        reply = QMessageBox.question(
+            self, "Cancelar revisión",
+            "¿Seguro que quieres cancelar? Se perderán los cambios no guardados.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
         self.user_approved = False
         self.review_completed.emit(False)
         self.reject()
