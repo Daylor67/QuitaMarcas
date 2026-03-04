@@ -63,6 +63,12 @@ class WatermarkTab(QWidget):
         self.edit_positions_btn.clicked.connect(self._open_position_editor)
         settings_layout.addWidget(self.edit_positions_btn)
 
+        # Botón para buscar actualizaciones
+        self.check_updates_btn = QPushButton("🔄 Buscar Actualizaciones")
+        self.check_updates_btn.setStyleSheet("padding: 8px; color: white;")
+        self.check_updates_btn.clicked.connect(self._check_for_updates)
+        settings_layout.addWidget(self.check_updates_btn)
+
         # Layout horizontal (placeholder para futuros controles)
         post_process_layout = QHBoxLayout()
         settings_layout.addLayout(post_process_layout)
@@ -130,6 +136,32 @@ class WatermarkTab(QWidget):
 
         except Exception as e:
             self.log(f"Error al abrir editor: {str(e)}")
+
+    def _check_for_updates(self):
+        """Busca actualizaciones manualmente y muestra el diálogo si hay una disponible"""
+        try:
+            from gui.update_dialog import UpdateDialog
+            from core.services.update_checker import UpdateChecker
+            from core.utils.version import APP_VERSION
+            from PySide6.QtWidgets import QMessageBox
+
+            self.check_updates_btn.setEnabled(False)
+            self.check_updates_btn.setText("🔄 Buscando...")
+
+            updater = UpdateChecker()
+            has_update, latest_version, download_url, release_notes = updater.check_for_updates()
+
+            if has_update and download_url:
+                dialog = UpdateDialog(self, APP_VERSION, latest_version, download_url, release_notes)
+                dialog.exec()
+            else:
+                QMessageBox.information(self, "Sin actualizaciones", "Ya tienes la última versión disponible.")
+
+        except Exception as e:
+            self.log(f"Error al buscar actualizaciones: {e}")
+        finally:
+            self.check_updates_btn.setEnabled(True)
+            self.check_updates_btn.setText("🔄 Buscar Actualizaciones")
 
     def _get_main_window(self):
         """Busca y retorna el MainWindow (ventana principal)"""
