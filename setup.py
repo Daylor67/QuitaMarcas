@@ -91,16 +91,22 @@ base = None
 if sys.platform == "win32":
     base = "Win32GUI"  # Oculta la consola en Windows
 
-# Ejecutable principal
+# Ejecutables
 executables = [
     Executable(
-        "SmartStitchGUI.py",
+        "Launcher.py",
         base=base,
         target_name="SmartStitch.exe",
         icon="assets/SmartStitchLogo.ico",
         shortcut_name=APP_NAME,
         shortcut_dir="DesktopFolder",
-    )
+    ),
+    Executable(
+        "SmartStitchGUI.py",
+        base=base,
+        target_name="main.exe",
+        icon="assets/SmartStitchLogo.ico",
+    ),
 ]
 
 # Setup

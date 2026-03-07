@@ -51,6 +51,11 @@ def main():
     shutil.move(str(original_folder), str(new_folder_path))
     print("✅ Carpeta renombrada exitosamente\n")
 
+    # Generar version.txt para que el Launcher conozca la versión instalada
+    version_file = new_folder_path / "version.txt"
+    version_file.write_text(APP_VERSION, encoding='utf-8')
+    print(f"✅ version.txt generado: {APP_VERSION}\n")
+
     # 4. Crear el ZIP
     zip_name = f"{APP_NAME}-{APP_VERSION}-win64.zip"
     zip_path = Path(zip_name)
