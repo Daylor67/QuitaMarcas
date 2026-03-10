@@ -63,6 +63,13 @@ class WatermarkTab(QWidget):
         self.edit_positions_btn.clicked.connect(self._open_position_editor)
         settings_layout.addWidget(self.edit_positions_btn)
 
+        # Botón para registrar/desregistrar menú contextual
+        self.context_menu_btn = QPushButton("📂 Registrar menú contextual")
+        self.context_menu_btn.setStyleSheet("padding: 8px; color: white;")
+        self.context_menu_btn.clicked.connect(self._toggle_context_menu)
+        settings_layout.addWidget(self.context_menu_btn)
+        self._update_context_menu_btn()
+
         # Botón para buscar actualizaciones
         self.check_updates_btn = QPushButton("🔄 Buscar Actualizaciones")
         self.check_updates_btn.setStyleSheet("padding: 8px; color: white;")
@@ -136,6 +143,42 @@ class WatermarkTab(QWidget):
 
         except Exception as e:
             self.log(f"Error al abrir editor: {str(e)}")
+
+    def _is_context_menu_registered(self):
+        """Comprueba si el menú contextual está registrado en el registro de Windows."""
+        try:
+            import winreg
+            winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\Directory\shell\SmartStitchWR")
+            return True
+        except FileNotFoundError:
+            return False
+
+    def _update_context_menu_btn(self):
+        """Actualiza el texto del botón según el estado actual."""
+        if self._is_context_menu_registered():
+            self.context_menu_btn.setText("📂 Desregistrar menú contextual")
+        else:
+            self.context_menu_btn.setText("📂 Registrar menú contextual")
+
+    def _toggle_context_menu(self):
+        """Registra o desregistra el menú contextual de carpetas."""
+        try:
+            import register_context_menu
+            from PySide6.QtWidgets import QMessageBox
+
+            if self._is_context_menu_registered():
+                register_context_menu.unregister()
+                QMessageBox.information(self, "Menú contextual", "Menú contextual eliminado correctamente.")
+            else:
+                register_context_menu.register()
+                QMessageBox.information(self, "Menú contextual",
+                    "Menú contextual registrado.\n"
+                    "Ahora puedes hacer clic derecho en cualquier carpeta y seleccionar 'Abrir con SmartStitch WR'.")
+
+            self._update_context_menu_btn()
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Error", f"No se pudo modificar el menú contextual:\n{e}")
 
     def _check_for_updates(self):
         """Busca actualizaciones manualmente y muestra el diálogo si hay una disponible"""

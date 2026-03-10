@@ -3,7 +3,7 @@ Información de versión de la aplicación
 """
 
 # Versión actual de la aplicación
-APP_VERSION = "3.1"
+APP_VERSION = "3.1.1"
 APP_NAME = "SmartStitch WR"
 APP_AUTHOR = "Daylor67"
 

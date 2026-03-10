@@ -84,6 +84,11 @@ def initialize_gui():
     processThread.postProcessConsole.connect(update_postprocess_console)
     # Show Window
     MainWindow.show()
+    # Si se abrió con una ruta como argumento (ej. desde menú contextual de Windows)
+    if len(sys.argv) > 1:
+        folder_arg = sys.argv[1]
+        if os.path.isdir(folder_arg):
+            MainWindow.inputField.setText(folder_arg)
     # Verificar actualizaciones al inicio
     check_for_updates()
 

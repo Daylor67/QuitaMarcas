@@ -126,7 +126,8 @@ del "%~f0"
 
 def launch_app(app_dir):
     exe_path = os.path.join(app_dir, APP_EXE)
-    subprocess.Popen([exe_path])
+    args = [exe_path] + sys.argv[1:]  # Pasar argumentos (ej. ruta desde menú contextual)
+    subprocess.Popen(args)
 
 
 def main():
