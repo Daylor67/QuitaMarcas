@@ -19,6 +19,7 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 from utils import UtilJson
+from core.utils.constants import SETTINGS_REL_DIR
 import numpy as np
 from natsort import natsorted
 from WatermarkRemove import align_watermark, remove_watermark
@@ -392,7 +393,7 @@ class SlideshowViewer(QDialog):
             folder_to_select = self.watermark_name
         else:
             # Usar la última carpeta guardada en settings
-            folder_to_select = UtilJson('__settings__/settings.json').get('last_watermark_folder', None)
+            folder_to_select = UtilJson(os.path.join(SETTINGS_REL_DIR, 'settings.json')).get('last_watermark_folder', None)
 
         if folder_to_select:
             index = self.watermark_folder_combo.findText(folder_to_select)
@@ -419,7 +420,7 @@ class SlideshowViewer(QDialog):
             self._load_watermark_positions()
 
             # Guardar como última carpeta usada
-            UtilJson('__settings__/settings.json').set('last_watermark_folder', folder_name)
+            UtilJson(os.path.join(SETTINGS_REL_DIR, 'settings.json')).set('last_watermark_folder', folder_name)
 
             # Crear carpeta de salida si aún no existe
             if not self.output_folder and self.folder_path:
