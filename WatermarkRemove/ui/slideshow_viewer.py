@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Tuple, Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, QGridLayout,
-    QScrollArea, QComboBox, QGroupBox, QCheckBox, QDoubleSpinBox, QMessageBox
+    QScrollArea, QComboBox, QGroupBox, QCheckBox, QDoubleSpinBox, QMessageBox, QLineEdit
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QRect, QEvent, QPoint
 from PySide6.QtGui import QPixmap, QKeyEvent, QWheelEvent, QPainter, QPen, QColor, QMouseEvent, QImage
@@ -50,7 +50,7 @@ class SlideshowViewer(QDialog):
 
     SUPPORTED_FORMATS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.tga', '.psd', '.psb', '.jfif')
 
-    def __init__(self, folder_path: str, parent=None, watermark_folder: str = None, watermark_name: str = None, watermark_tab=None):
+    def __init__(self, folder_path: str, parent=None, watermark_tab=None):
         super().__init__(parent)
         self.folder_path = Path(folder_path) if folder_path else None
         self.image_files = []
@@ -63,11 +63,12 @@ class SlideshowViewer(QDialog):
         # Referencia al watermark_tab para logging
         self.watermark_tab = watermark_tab
 
-        # Información de marca de agua
-        self.watermark_folder = Path(watermark_folder) if watermark_folder else None
-        self.watermark_name = watermark_name
+        # Información de marca de agua (se setean al elegir carpeta en el combo)
+        self.watermark_folder = None
+        self.watermark_name = None
         self.watermark_positions = {}  # Posiciones cargadas desde JSON
-        self.watermark_files = []  # Archivos PNG de marcas de agua
+        self.watermark_files = []      # Archivos PNG visibles en el combo (subset filtrado)
+        self.watermark_files_all = []  # Lista completa sin filtro
 
         # Procesamiento de marcas de agua
         self.output_folder = None  # Carpeta donde se guardarán las imágenes procesadas
@@ -95,15 +96,6 @@ class SlideshowViewer(QDialog):
 
         self._setup_ui()
         self._load_image_list()
-
-        # Crear carpeta de salida si se proporcionó watermark
-        if self.watermark_folder and self.folder_path:
-            self._create_output_folder()
-
-        # Cargar marcas de agua y posiciones si se proporcionó la carpeta
-        if self.watermark_folder:
-            self._load_watermark_files()
-            self._load_watermark_positions()
 
         if self.image_files:
             self._show_current_image()
@@ -191,6 +183,10 @@ class SlideshowViewer(QDialog):
 
         # Selector de marca individual dentro de la carpeta
         seleccion_layout.addWidget(QLabel("Marca específica:"))
+        self.watermark_filter = QLineEdit()
+        self.watermark_filter.setPlaceholderText("Filtrar marcas...")
+        self.watermark_filter.textChanged.connect(self._filter_watermark_combo)
+        seleccion_layout.addWidget(self.watermark_filter)
         self.watermark_combo = QComboBox()
         self.watermark_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.watermark_combo.currentIndexChanged.connect(self._on_watermark_changed)
@@ -387,13 +383,8 @@ class SlideshowViewer(QDialog):
         for folder in folders:
             self.watermark_folder_combo.addItem(folder.name, str(folder))
 
-        # Determinar qué carpeta seleccionar
-        if self.watermark_folder:
-            # Si se proporcionó una carpeta inicial, usarla
-            folder_to_select = self.watermark_name
-        else:
-            # Usar la última carpeta guardada en settings
-            folder_to_select = UtilJson(os.path.join(SETTINGS_REL_DIR, 'settings.json')).get('last_watermark_folder', None)
+        # Usar la última carpeta guardada en settings
+        folder_to_select = UtilJson(os.path.join(SETTINGS_REL_DIR, 'settings.json')).get('last_watermark_folder', None)
 
         if folder_to_select:
             index = self.watermark_folder_combo.findText(folder_to_select)
@@ -415,7 +406,6 @@ class SlideshowViewer(QDialog):
         folder_name = self.watermark_folder_combo.currentText()
         if folder_path:
             self.watermark_folder = Path(folder_path)
-            self.watermark_name = folder_name  # Actualizar el nombre
             self._load_watermarks_into_combo()
             self._load_watermark_positions()
 
@@ -433,65 +423,87 @@ class SlideshowViewer(QDialog):
         """Carga las marcas de agua PNG en el ComboBox desde la carpeta seleccionada"""
         self.watermark_combo.clear()
         self.watermark_files = []
+        self.watermark_files_all = []
 
         if not self.watermark_folder or not self.watermark_folder.exists():
             return
 
-        # Cargar todos los archivos PNG de la carpeta
         for file in natsorted(self.watermark_folder.iterdir()):
             if file.is_file() and file.suffix.lower() == '.png':
-                self.watermark_files.append(file)
-                # Agregar al ComboBox: nombre del archivo como label, ruta como data
-                self.watermark_combo.addItem(file.name, str(file))
+                self.watermark_files_all.append(file)
+
+        # Aplicar filtro actual (por si había texto al cambiar de carpeta)
+        self._filter_watermark_combo(self.watermark_filter.text())
+
+    def _filter_watermark_combo(self, text: str):
+        """Filtra el combo de marcas según el texto; actualiza self.watermark_files en paralelo."""
+        query = text.strip().lower()
+        self.watermark_combo.blockSignals(True)
+        self.watermark_combo.clear()
+        self.watermark_files = [
+            f for f in self.watermark_files_all
+            if query in f.name.lower()
+        ] if query else list(self.watermark_files_all)
+
+        for file in self.watermark_files:
+            self.watermark_combo.addItem(file.name, str(file))
+
+        self.watermark_combo.blockSignals(False)
+
+        if self.watermark_combo.count() > 0:
+            self.watermark_combo.setCurrentIndex(0)
+            self._on_watermark_changed(0)
+        else:
+            self.watermark_positions = {}
+            self._show_current_image()
 
     def _on_watermark_changed(self, index):
         """Callback cuando cambia la marca individual seleccionada"""
         if index >= 0:
-            # Cargar el alpha guardado para esta marca (o 1.0 por defecto)
-            saved_alpha = self.watermark_alpha_values.get(index, 1.0)
-            self.alpha_adjust.blockSignals(True)  # Evitar trigger de _on_alpha_changed
-            self.alpha_adjust.setValue(saved_alpha)
-            self.alpha_adjust.blockSignals(False)
+            # alpha_adjust puede no existir aún si se llama durante la construcción del panel
+            if hasattr(self, 'alpha_adjust'):
+                saved_alpha = self.watermark_alpha_values.get(index, 1.0)
+                self.alpha_adjust.blockSignals(True)
+                self.alpha_adjust.setValue(saved_alpha)
+                self.alpha_adjust.blockSignals(False)
+
+            # Recargar posiciones (cada PNG puede tener su propio set)
+            self._load_watermark_positions()
 
             # Actualizar la visualización con los nuevos cuadrados
             self._show_current_image()
 
-    def _load_watermark_files(self):
-        """Carga los archivos PNG de marcas de agua desde la carpeta"""
-        if not self.watermark_folder or not self.watermark_folder.exists():
-            return
-
-        self.watermark_files = []
-        for file in natsorted(self.watermark_folder.iterdir()):
-            if file.is_file() and file.suffix.lower() == '.png':
-                self.watermark_files.append(file)
-
     def _load_watermark_positions(self):
-        """Carga las posiciones de marcas de agua desde wm_positions.json"""
-        if not self.watermark_name:
+        """Carga posiciones para la PNG actual; cae a folder-level si no existe."""
+        self.watermark_positions = {}
+        if not self.watermark_folder:
             return
 
         try:
             wm_dir = os.path.dirname(current_dir)
             positions_path = Path(wm_dir) / 'wm_positions.json'
-
             if not positions_path.exists():
-                self.watermark_positions = {}
                 return
 
-            # Cargar posiciones desde JSON
-            positions_file = UtilJson(positions_path)
-            data = positions_file.read()
+            data = UtilJson(positions_path).read()
+            folder_data = data.get(self.watermark_folder.name, {}) or {}
 
-            # Obtener las posiciones para la marca actual
-            if self.watermark_name in data:
-                self.watermark_positions = data[self.watermark_name]
-            else:
-                self.watermark_positions = {}
+            # Per-marca: usar si la PNG actual tiene entrada con posiciones
+            wm_name = self.watermark_combo.currentText() if self.watermark_combo.count() else None
+            if wm_name and isinstance(folder_data.get(wm_name), dict):
+                candidate = folder_data[wm_name]
+                if any(k.startswith('pos_') for k in candidate):
+                    self.watermark_positions = candidate
+                    return
+
+            # Fallback per-carpeta: filtrar solo claves pos_X directas
+            self.watermark_positions = {
+                k: v for k, v in folder_data.items()
+                if k.startswith('pos_') and isinstance(v, dict) and 'offset_x' in v
+            }
 
         except Exception as e:
             self._log(f"⚠️ Error cargando posiciones de marca de agua: {e}")
-            self.watermark_positions = {}
 
     def _show_current_image(self):
         """Muestra la imagen actual con el zoom aplicado"""

@@ -7,7 +7,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QGroupBox, QFileDialog, QWidget, QMessageBox,
-    QScrollArea, QSlider, QSpinBox
+    QScrollArea, QSlider, QSpinBox, QCheckBox
 )
 from PySide6.QtCore import Qt, Signal, QEvent
 from PySide6.QtGui import QPixmap, QKeyEvent, QImage, QWheelEvent
@@ -90,6 +90,7 @@ class PositionEditor(QDialog):
         self.current_image_index = 0
         self.current_image = None
         self.current_watermark = None
+        self.watermark_path = None  # Ruta del PNG actualmente seleccionado
 
         # Ruta base de marcas
         self.marcas_base_path = Path(os.path.dirname(current_dir)) / 'marcas'
@@ -162,6 +163,11 @@ class PositionEditor(QDialog):
         self.watermark_combo = QComboBox()
         self.watermark_combo.currentIndexChanged.connect(self._on_watermark_changed)
         folders_layout.addWidget(self.watermark_combo)
+
+        # Modo de guardado: por marca individual (default) o por carpeta (legacy)
+        self.save_by_watermark_checkbox = QCheckBox("Guardar posición por marca individual")
+        self.save_by_watermark_checkbox.setChecked(True)
+        folders_layout.addWidget(self.save_by_watermark_checkbox)
 
         # Cargar las carpetas de marcas disponibles
         self._load_watermark_folders()
@@ -451,6 +457,7 @@ class PositionEditor(QDialog):
         watermark_index = self.watermark_combo.currentIndex()
         watermark_path = self.watermark_files[watermark_index]
         self.current_watermark = load_images_cv2(str(watermark_path))
+        self.watermark_path = watermark_path
 
     def _on_watermark_changed(self, index):
         """Callback cuando cambia la marca individual seleccionada"""
@@ -560,7 +567,7 @@ class PositionEditor(QDialog):
             self.accept()
 
     def _save_to_json(self):
-        """Guarda en JSON"""
+        """Guarda en JSON. Modo por marca (default) anida bajo el PNG; modo carpeta escribe pos_X directos."""
         if not self.watermarks_folder or not self.saved_positions:
             return
 
@@ -568,15 +575,26 @@ class PositionEditor(QDialog):
             watermark_folder_name = self.watermarks_folder.name
             wm_dir = os.path.dirname(current_dir)
             json_path = Path(wm_dir) / 'wm_positions.json'
-
             json_file = UtilJson(json_path)
 
-            positions_dict = {}
-            for i, pos_data in enumerate(self.saved_positions, start=1):
-                positions_dict[f'pos_{i}'] = pos_data
+            positions_dict = {f'pos_{i}': p for i, p in enumerate(self.saved_positions, start=1)}
 
-            json_file.set(watermark_folder_name, positions_dict)
-            print(f"✓ Guardadas {len(self.saved_positions)} posiciones en '{watermark_folder_name}'")
+            # Preservar otras marcas/posiciones ya guardadas en la misma carpeta
+            folder_data = json_file.get(watermark_folder_name, {}) or {}
+
+            if self.save_by_watermark_checkbox.isChecked():
+                if not self.watermark_path:
+                    raise ValueError("No hay marca seleccionada para asociar las posiciones")
+                folder_data[self.watermark_path.name] = positions_dict
+                target_label = f"{watermark_folder_name} / {self.watermark_path.name}"
+            else:
+                # Modo carpeta (legacy): pos_X directos al folder
+                for k, v in positions_dict.items():
+                    folder_data[k] = v
+                target_label = watermark_folder_name
+
+            json_file.set(watermark_folder_name, folder_data)
+            print(f"✓ Guardadas {len(self.saved_positions)} posiciones en '{target_label}'")
 
         except Exception as e:
             QMessageBox.critical(self, "Error al guardar", f"No se pudieron guardar las posiciones:\n{str(e)}")

@@ -112,20 +112,35 @@ def find_wm_gpu(
     Returns:
         tuple: (best_x, best_y) o None si falla
     """
+    search_region = None
     try:
         h_img, w_img = image.shape[:2]
+        h_wm, w_wm = watermark.shape[:2]
 
         # Usar coordenadas especificadas o el centro
         centro_x = center_x if center_x is not None else w_img // 2
         centro_y = center_y if center_y is not None else h_img // 2
 
+        # El search debe cubrir al menos el tamaño de la marca,
+        # de lo contrario matchTemplate lanza assertion (img < templ)
+        half_w = max(radio, w_wm // 2 + 1)
+        half_h = max(radio, h_wm // 2 + 1)
+
         # Extraer región de búsqueda de la imagen
-        search_x_start = max(0, centro_x - radio)
-        search_x_end = min(w_img, centro_x + radio)
-        search_y_start = max(0, centro_y - radio)
-        search_y_end = min(h_img, centro_y + radio)
+        search_x_start = max(0, centro_x - half_w)
+        search_x_end = min(w_img, centro_x + half_w)
+        search_y_start = max(0, centro_y - half_h)
+        search_y_end = min(h_img, centro_y + half_h)
 
         search_region = image[search_y_start:search_y_end, search_x_start:search_x_end]
+
+        # Si la imagen es más chica que la marca, no hay nada que hacer
+        if search_region.shape[0] < h_wm or search_region.shape[1] < w_wm:
+            print(
+                f"find_wm_gpu: search ({search_region.shape[1]}x{search_region.shape[0]}) "
+                f"menor que watermark ({w_wm}x{h_wm}); abortando."
+            )
+            return None
 
         # Preparar marca de agua para template matching
         # Usar solo RGB, el alpha lo usaremos como máscara después
@@ -156,7 +171,10 @@ def find_wm_gpu(
         return best_x, best_y
 
     except Exception as e:
-        print(f"Error en find_wm_gpu: {e}")
+        search_shape = search_region.shape if search_region is not None else None
+        print(
+            f"Error en find_wm_gpu: {e} | search={search_shape} wm={watermark.shape}"
+        )
         return None
 
 
