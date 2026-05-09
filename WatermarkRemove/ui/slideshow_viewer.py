@@ -23,7 +23,7 @@ from core.utils.constants import SETTINGS_REL_DIR
 import numpy as np
 from natsort import natsorted
 from WatermarkRemove import align_watermark, remove_watermark
-from WatermarkRemove.wm_remove import load_images_cv2, guardar, find_wm
+from WatermarkRemove.wm_remove import load_images_cv2, guardar, find_wm, quick_align_preview
 
 class SlideshowViewer(QDialog):
     """
@@ -89,6 +89,7 @@ class SlideshowViewer(QDialog):
         # Sistema de eventos atómicos para remoción de marcas
         self.current_event_position: Optional[Tuple[int, int]] = None  # Coordenadas del click del evento actual (best_x, best_y)
         self.current_event_watermark_index: Optional[int] = None  # Índice de la marca de agua usada en el evento actual
+        self.current_event_watermark: Optional[np.ndarray] = None  # Marca cacheada (BGRA) para sub-eventos del evento actual
         self.base_image_for_preview: Optional[np.ndarray] = None  # Imagen base para el sub-evento actual
 
         # Imagen de trabajo en memoria (fuente de verdad para edición)
@@ -273,6 +274,16 @@ class SlideshowViewer(QDialog):
         offset_adj_container.hide()
         self.offset_adj_container = offset_adj_container
         seleccion_layout.addWidget(offset_adj_container)
+
+        # Toggle de preview rápido (vectorizado, no es el resultado final)
+        self.quick_preview_checkbox = QCheckBox("Preview rápida")
+        self.quick_preview_checkbox.setToolTip(
+            "Muestra la marca como un parche oscurecido para evaluar alineación.\n"
+            "Mucho más rápido en marcas grandes; el resultado final usa el cálculo completo al aceptar."
+        )
+        self.quick_preview_checkbox.stateChanged.connect(self._on_offset_adj_changed)
+        self.quick_preview_checkbox.hide()
+        seleccion_layout.addWidget(self.quick_preview_checkbox)
 
         # Botones de modo manual (ocultos por defecto)
         self.remove_btn = QPushButton("Remover marca")
@@ -932,6 +943,7 @@ class SlideshowViewer(QDialog):
         self.base_image_for_preview = None
         self.current_event_position = None
         self.current_event_watermark_index = None
+        self.current_event_watermark = None
         self.preview_image = None
         self.is_preview_active = False
 
@@ -1102,6 +1114,7 @@ class SlideshowViewer(QDialog):
             self.label_alpha_adj.show()
             self.label_offset_adj.show()
             self.offset_adj_container.show()
+            self.quick_preview_checkbox.show()
             self.remove_btn.show()
             self._log("🔍 Modo selección manual activado")
         else:
@@ -1112,6 +1125,7 @@ class SlideshowViewer(QDialog):
             self.label_alpha_adj.hide()
             self.label_offset_adj.hide()
             self.offset_adj_container.hide()
+            self.quick_preview_checkbox.hide()
             self.remove_btn.hide()
             self.accept_btn.hide()
             self.revert_btn.hide()
@@ -1175,22 +1189,15 @@ class SlideshowViewer(QDialog):
         if not self.is_preview_active:
             return
 
-        if self.current_event_position is None or self.current_event_watermark_index is None:
+        if self.current_event_position is None or self.current_event_watermark is None:
             return
 
         try:
-            # Recargar marca de agua
-            watermark_file = self.watermark_files[self.current_event_watermark_index]
-            watermark = load_images_cv2(watermark_file)
-
-            # Recalcular preview desde la base con nuevo alpha y offset actual
             best_x, best_y = self.current_event_position
-            self.preview_image = remove_watermark(
-                self.base_image_for_preview,
-                watermark,
+            self.preview_image = self._compute_live_preview(
                 best_x + self.offset_x_adj.value(),
                 best_y + self.offset_y_adj.value(),
-                alpha_adjust=value
+                alpha=value,
             )
             self._apply_zoom()
 
@@ -1201,22 +1208,35 @@ class SlideshowViewer(QDialog):
         """Recalcula el preview cuando cambia el ajuste de posición."""
         if not self.is_preview_active:
             return
-        if self.current_event_position is None or self.current_event_watermark_index is None:
+        if self.current_event_position is None or self.current_event_watermark is None:
             return
         try:
-            watermark_file = self.watermark_files[self.current_event_watermark_index]
-            watermark = load_images_cv2(watermark_file)
             best_x, best_y = self.current_event_position
-            self.preview_image = remove_watermark(
-                self.base_image_for_preview,
-                watermark,
+            self.preview_image = self._compute_live_preview(
                 best_x + self.offset_x_adj.value(),
                 best_y + self.offset_y_adj.value(),
-                alpha_adjust=self.alpha_adjust.value()
+                alpha=self.alpha_adjust.value(),
             )
             self._apply_zoom()
         except Exception as e:
             self._log(f"❌ Error recalculando preview (offset): {e}")
+
+    def _compute_live_preview(self, x, y, alpha):
+        """Preview en vivo: vectorizado si el toggle está activo, sino remove_watermark sin filtro."""
+        if self.quick_preview_checkbox.isChecked():
+            return quick_align_preview(
+                self.base_image_for_preview,
+                self.current_event_watermark,
+                x, y,
+                alpha_adjust=alpha,
+            )
+        return remove_watermark(
+            self.base_image_for_preview,
+            self.current_event_watermark,
+            x, y,
+            alpha_adjust=alpha,
+            apply_jpeg_filter=False,
+        )
 
     def _remove_watermark_preview(self):
         """Crea un preview removiendo la marca de agua en la posición del cursor. Sistema de eventos atómicos."""
@@ -1247,12 +1267,13 @@ class SlideshowViewer(QDialog):
             # Guardar índice de marca actual
             self.current_event_watermark_index = current_watermark_index
 
-            # Cargar marca de agua
+            # Cargar marca de agua y cachear para sub-eventos (alpha/offset live)
             watermark_file = self.watermark_files[current_watermark_index]
             watermark = load_images_cv2(watermark_file)
             if watermark is None:
                 self._log(f"❌ Error cargando marca de agua: {watermark_file.name}")
                 return
+            self.current_event_watermark = watermark
 
             # Obtener coordenadas del mouse
             center_x = self.mouse_position.x()
@@ -1279,13 +1300,11 @@ class SlideshowViewer(QDialog):
             self.offset_x_adj.blockSignals(False)
             self.offset_y_adj.blockSignals(False)
 
-            # Crear preview con alpha y offset actuales
-            self.preview_image = remove_watermark(
-                self.base_image_for_preview,
-                watermark,
+            # Preview en vivo (vectorizado si el toggle está activo)
+            self.preview_image = self._compute_live_preview(
                 best_x + self.offset_x_adj.value(),
                 best_y + self.offset_y_adj.value(),
-                alpha_adjust=self.alpha_adjust.value()
+                alpha=self.alpha_adjust.value(),
             )
 
             # Activar evento
@@ -1317,13 +1336,20 @@ class SlideshowViewer(QDialog):
             return
 
         try:
-            # Guardar imagen procesada
             current_file = self.image_files[self.current_index]
             if not self.output_folder:
                 self._create_output_folder()
 
-            # CRÍTICO: Actualizar working_image con el preview aceptado
-            self.working_image = self.preview_image.copy()
+            # Pasada final con filtro JPEG (los previews en vivo lo saltean por velocidad)
+            best_x, best_y = self.current_event_position
+            self.working_image = remove_watermark(
+                self.base_image_for_preview,
+                self.current_event_watermark,
+                best_x + self.offset_x_adj.value(),
+                best_y + self.offset_y_adj.value(),
+                alpha_adjust=self.alpha_adjust.value(),
+                apply_jpeg_filter=True,
+            )
 
             # Guardar a disco
             guardar(current_file, self.working_image, self.output_folder)
@@ -1335,6 +1361,7 @@ class SlideshowViewer(QDialog):
             self.base_image_for_preview = None
             self.current_event_position = None
             self.current_event_watermark_index = None
+            self.current_event_watermark = None
             self.preview_image = None
             self.is_preview_active = False
 
@@ -1347,6 +1374,9 @@ class SlideshowViewer(QDialog):
             self.accept_btn.hide()
             self.revert_btn.hide()
             self.remove_btn.show()
+
+            # Refrescar display: ahora se muestra working_image (con filtro JPEG aplicado)
+            self._apply_zoom()
 
             # Log
             self._log(f"✅ Evento guardado en {current_file.name}")
@@ -1368,6 +1398,7 @@ class SlideshowViewer(QDialog):
         self.base_image_for_preview = None
         self.current_event_position = None
         self.current_event_watermark_index = None
+        self.current_event_watermark = None
         self.preview_image = None
         self.is_preview_active = False
 

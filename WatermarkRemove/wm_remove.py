@@ -397,6 +397,53 @@ def remove_watermark(
     return result.astype(np.uint8)
 
 
+def quick_align_preview(
+    image: np.ndarray,
+    watermark: np.ndarray,
+    x: float,
+    y: float,
+    alpha_adjust: float = 1.0,
+) -> np.ndarray:
+    """
+    Preview vectorizado para feedback rápido de alineación.
+
+    Calcula `image - watermark * alpha` (sin la división por (1-alpha) que hace
+    remove_watermark). Visualmente: si está bien alineado se ve un parche
+    oscurecido limpio; si está mal alineado, se ve un "fantasma" de la marca.
+
+    No es el resultado final — solo sirve para evaluar alineación a alta
+    velocidad mientras se ajustan offset/alpha en vivo.
+    """
+    x_int = int(np.floor(x))
+    y_int = int(np.floor(y))
+
+    h_img, w_img = image.shape[:2]
+    h_wm, w_wm = watermark.shape[:2]
+
+    # Región de superposición
+    x0_i = max(0, x_int)
+    y0_i = max(0, y_int)
+    x1_i = min(w_img, x_int + w_wm)
+    y1_i = min(h_img, y_int + h_wm)
+
+    x0_w = max(0, -x_int)
+    y0_w = max(0, -y_int)
+    x1_w = x0_w + (x1_i - x0_i)
+    y1_w = y0_w + (y1_i - y0_i)
+
+    if x0_i >= x1_i or y0_i >= y1_i:
+        return image.copy()
+
+    result = image.astype(np.int16, copy=True)
+    wm_rgb = watermark[y0_w:y1_w, x0_w:x1_w, :3].astype(np.float32)
+    alpha = watermark[y0_w:y1_w, x0_w:x1_w, 3].astype(np.float32) * (alpha_adjust / 255.0)
+
+    subtraction = (wm_rgb * alpha[..., None]).astype(np.int16)
+    result[y0_i:y1_i, x0_i:x1_i] -= subtraction
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
 def apply_jpeg_noise_filter(
     image: np.ndarray,
     watermark_alpha: np.ndarray,
