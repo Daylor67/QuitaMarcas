@@ -89,7 +89,7 @@ bdist_msi_options = {
 # Configuración base para Windows GUI
 base = None
 if sys.platform == "win32":
-    base = "Win32GUI"  # Oculta la consola en Windows
+    base = "gui"  # Oculta la consola en Windows
 
 # Ejecutables
 executables = [
