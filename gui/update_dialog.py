@@ -8,7 +8,14 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont
 
 from core.services.update_checker import UpdateChecker
-from core.services import SettingsHandler
+
+# SettingsHandler arrastra el árbol completo de servicios (ImageHandler, etc.)
+# Importarlo desde el Launcher rompe su aislamiento, así que lo cargamos defensivamente:
+# si falla, "recordar versión rechazada" queda como no-op.
+try:
+    from core.services import SettingsHandler
+except Exception:
+    SettingsHandler = None
 
 
 class DownloadThread(QThread):
@@ -49,14 +56,14 @@ class UpdateDialog(QDialog):
         self.release_notes = release_notes
         self.updater = UpdateChecker()
         self.download_thread = None
-        self.settings = SettingsHandler()
+        self.settings = SettingsHandler() if SettingsHandler is not None else None
 
         self.init_ui()
 
     def init_ui(self):
         """Inicializa la interfaz del diálogo"""
         self.setWindowTitle("Actualización Disponible")
-        self.setMinimumWidth(500)
+        self.setMinimumWidth(800)
         self.setMinimumHeight(400)
 
         layout = QVBoxLayout()
@@ -82,11 +89,14 @@ class UpdateDialog(QDialog):
 
         self.notes_text = QTextEdit()
         self.notes_text.setReadOnly(True)
+        self.notes_text.setStyleSheet(
+            "background:#1e2a3a; color:#ddeeff; font-size:1.2em; border:none; padding:4px;"
+        )
         self.notes_text.setMarkdown(self.release_notes)
-        self.notes_text.setMaximumHeight(200)
+        self.notes_text.setMaximumHeight(600)
         layout.addWidget(self.notes_text)
 
-        layout.addSpacing(10)
+        layout.addSpacing(6)
 
         # Barra de progreso (oculta inicialmente)
         self.progress_bar = QProgressBar()
@@ -119,7 +129,8 @@ class UpdateDialog(QDialog):
 
     def on_later_clicked(self):
         """Guarda la versión rechazada y cierra el diálogo"""
-        self.settings.save("skipped_update_version", self.latest_version)
+        if self.settings is not None:
+            self.settings.save("skipped_update_version", self.latest_version)
         self.reject()
 
     def start_update(self):
@@ -156,7 +167,8 @@ class UpdateDialog(QDialog):
         self.progress_bar.setVisible(False)
 
         # Limpiar la versión rechazada ya que el usuario decidió actualizar
-        self.settings.save("skipped_update_version", "")
+        if self.settings is not None:
+            self.settings.save("skipped_update_version", "")
 
         # Aplicar actualización
         if self.updater.apply_update(zip_path):
