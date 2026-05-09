@@ -1,0 +1,11 @@
+# Cambios
+
+## Removedor de marcas de agua
+- Se agregó un buscador para filtrar rápidamente las marcas disponibles en el selector
+- En el modo de selección manual, ahora podés ajustar con precisión la posición que detectó el programa usando controles de offset X e Y antes de confirmar
+- **Modo recortar** para cortar partes de la imagen
+- Se corrigió un error que podía ocurrir al buscar la marca de agua en imágenes de ancho reducido
+
+## Editor de posiciones
+- Ahora podés guardar posiciones distintas para cada variante de marca de agua dentro de una misma carpeta, en lugar de tener que duplicar carpetas
+- Nuevo selector para elegir si las posiciones guardadas aplican a una marca específica o a toda la carpeta
