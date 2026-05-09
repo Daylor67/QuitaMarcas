@@ -76,6 +76,9 @@ class SlideshowViewer(QDialog):
         self.processed_positions = {}  # Diccionario: {image_index: set(pos_names)} - posiciones procesadas por imagen
         self.watermark_rectangles = {}  # Diccionario: pos_name -> QRect (para detección de clicks)
 
+        # Modo recorte
+        self.crop_mode_enabled = False
+
         # Modo selección manual
         self.manual_mode_enabled = False  # Si está activado el modo manual
         self.manual_overlay_label = None  # Label flotante para el overlay
@@ -194,6 +197,33 @@ class SlideshowViewer(QDialog):
 
         # Cargar las carpetas de marcas disponibles
         self._load_watermark_folders()
+
+        # Checkbox modo recorte
+        self.crop_mode_checkbox = QCheckBox("Modo recorte")
+        self.crop_mode_checkbox.stateChanged.connect(self._toggle_crop_mode)
+        seleccion_layout.addWidget(self.crop_mode_checkbox)
+
+        self.crop_pixels_input = QSpinBox()
+        self.crop_pixels_input.setRange(0, 99999)
+        self.crop_pixels_input.setSuffix(" px")
+        self.crop_pixels_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Cargar último valor persistido en settings
+        saved_crop = UtilJson(os.path.join(SETTINGS_REL_DIR, 'settings.json')).get('last_crop_pixels', 0) or 0
+        self.crop_pixels_input.setValue(int(saved_crop))
+        self.crop_pixels_input.valueChanged.connect(self._on_crop_pixels_changed)
+        self.crop_pixels_input.hide()
+        seleccion_layout.addWidget(self.crop_pixels_input)
+
+        self.crop_invert_checkbox = QCheckBox("De abajo hacia arriba")
+        self.crop_invert_checkbox.stateChanged.connect(lambda _: self._apply_zoom())
+        self.crop_invert_checkbox.hide()
+        seleccion_layout.addWidget(self.crop_invert_checkbox)
+
+        self.crop_apply_btn = QPushButton("Aplicar recorte")
+        self.crop_apply_btn.clicked.connect(self._apply_crop)
+        self.crop_apply_btn.setStyleSheet("padding: 8px; font-size: 11px; background-color: #9C27B0; color: white; font-weight: bold;")
+        self.crop_apply_btn.hide()
+        seleccion_layout.addWidget(self.crop_apply_btn)
 
         # Checkbox modo selección manual
         self.opciones_avanzadas = QCheckBox("Modo selección manual")
@@ -612,13 +642,105 @@ class SlideshowViewer(QDialog):
             Qt.TransformationMode.SmoothTransformation
         )
 
-        # Si hay posiciones de marcas de agua y NO estamos en modo manual, dibujar overlays
-        if self.watermark_positions and self.watermark_files and not self.manual_mode_enabled:
+        # Overlays: marcas de agua (desactivado en modo recorte o manual) o recorte
+        if self.watermark_positions and self.watermark_files and not self.manual_mode_enabled and not self.crop_mode_enabled:
             scaled_pixmap = self._draw_watermark_overlays(scaled_pixmap, scale_factor)
+
+        if self.crop_mode_enabled:
+            scaled_pixmap = self._draw_crop_overlay(scaled_pixmap, scale_factor)
 
         self.image_label.setPixmap(scaled_pixmap)
         # Ajustar el tamaño del label para que funcione el scroll
         self.image_label.resize(scaled_pixmap.size())
+
+    def _toggle_crop_mode(self, state):
+        """Activa o desactiva el modo de recorte."""
+        self.crop_mode_enabled = (state == Qt.CheckState.Checked.value)
+
+        if self.crop_mode_enabled:
+            # Desactivar modo manual si estaba activo
+            if self.opciones_avanzadas.isChecked():
+                self.opciones_avanzadas.setChecked(False)
+            self.crop_pixels_input.show()
+            self.crop_invert_checkbox.show()
+            self.crop_apply_btn.show()
+        else:
+            self.crop_pixels_input.hide()
+            self.crop_invert_checkbox.hide()
+            self.crop_apply_btn.hide()
+
+        self._apply_zoom()
+
+    def _on_crop_pixels_changed(self, value):
+        """Actualiza el overlay y persiste el valor en settings."""
+        UtilJson(os.path.join(SETTINGS_REL_DIR, 'settings.json')).set('last_crop_pixels', int(value))
+        if self.crop_mode_enabled:
+            self._apply_zoom()
+
+    def _draw_crop_overlay(self, pixmap: QPixmap, scale_factor: float) -> QPixmap:
+        """Dibuja un overlay semi-transparente mostrando la zona a recortar."""
+        pixels = self.crop_pixels_input.value()
+        if pixels <= 0:
+            return pixmap
+
+        result_pixmap = QPixmap(pixmap)
+        painter = QPainter(result_pixmap)
+
+        w = result_pixmap.width()
+        h = result_pixmap.height()
+        scaled_pixels = min(int(pixels * scale_factor), h)
+
+        if self.crop_invert_checkbox.isChecked():
+            rect = QRect(0, h - scaled_pixels, w, scaled_pixels)
+        else:
+            rect = QRect(0, 0, w, scaled_pixels)
+
+        painter.fillRect(rect, QColor(255, 80, 0, 110))
+        pen = QPen(QColor(255, 80, 0, 230))
+        pen.setWidth(2)
+        painter.setPen(pen)
+        painter.drawRect(rect.adjusted(1, 1, -1, -1))
+
+        # Texto indicativo
+        painter.setPen(QPen(QColor(255, 255, 255, 220)))
+        painter.drawText(rect.adjusted(6, 4, 0, 0), f"{pixels}px")
+
+        painter.end()
+        return result_pixmap
+
+    def _apply_crop(self):
+        """Recorta working_image y guarda el resultado."""
+        if not self.image_files or self.working_image is None:
+            return
+        try:
+            pixels = self.crop_pixels_input.value()
+            if pixels <= 0:
+                self._log("⚠️ Ingresá la cantidad de píxeles a recortar")
+                return
+
+            h = self.working_image.shape[0]
+            if pixels >= h:
+                self._log("❌ El recorte supera la altura de la imagen")
+                return
+
+            if self.crop_invert_checkbox.isChecked():
+                self.working_image = self.working_image[:h - pixels]
+                direccion = "abajo"
+            else:
+                self.working_image = self.working_image[pixels:]
+                direccion = "arriba"
+
+            current_file = self.image_files[self.current_index]
+            if not self.output_folder:
+                self._create_output_folder()
+            guardar(current_file, self.working_image, self.output_folder)
+            self.processed_images.add(self.current_index)
+
+            self._show_current_image()
+            self._log(f"✂️ Recortados {pixels}px desde {direccion} → {current_file.name}")
+
+        except Exception as e:
+            self._log(f"❌ Error al recortar: {e}")
 
     def _draw_watermark_overlays(self, pixmap: QPixmap, scale_factor: float) -> QPixmap:
         """
