@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Tuple, Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, QGridLayout,
-    QScrollArea, QComboBox, QGroupBox, QCheckBox, QDoubleSpinBox, QMessageBox, QLineEdit
+    QScrollArea, QComboBox, QGroupBox, QCheckBox, QDoubleSpinBox, QMessageBox, QLineEdit, QSpinBox
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QRect, QEvent, QPoint
 from PySide6.QtGui import QPixmap, QKeyEvent, QWheelEvent, QPainter, QPen, QColor, QMouseEvent, QImage
@@ -207,12 +207,42 @@ class SlideshowViewer(QDialog):
         self.alpha_adjust = QDoubleSpinBox()
         self.alpha_adjust.setRange(0.1, 2)
         self.alpha_adjust.setValue(1.0)
-        self.alpha_adjust.setSingleStep(0.01)  # Incremento de 0.01 (centésimas)
-        self.alpha_adjust.setDecimals(2)  # Mostrar 2 decimales
+        self.alpha_adjust.setSingleStep(0.01)
+        self.alpha_adjust.setDecimals(2)
         self.alpha_adjust.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.alpha_adjust.valueChanged.connect(self._on_alpha_changed)  # Conectar para recalcular preview en tiempo real
+        self.alpha_adjust.valueChanged.connect(self._on_alpha_changed)
         self.alpha_adjust.hide()
         seleccion_layout.addWidget(self.alpha_adjust)
+
+        # Ajuste de posición detectada (offset fino post-detección)
+        self.label_offset_adj = QLabel("Ajuste posición (Horizontal / Vertical):")
+        self.label_offset_adj.hide()
+        seleccion_layout.addWidget(self.label_offset_adj)
+
+        offset_adj_container = QWidget()
+        offset_adj_layout = QHBoxLayout(offset_adj_container)
+        offset_adj_layout.setContentsMargins(0, 0, 0, 0)
+        offset_adj_layout.setSpacing(6)
+
+        self.offset_x_adj = QSpinBox()
+        self.offset_x_adj.setRange(-9999, 9999)
+        self.offset_x_adj.setValue(0)
+        self.offset_x_adj.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.offset_x_adj.setPrefix("H: ")
+        self.offset_x_adj.valueChanged.connect(self._on_offset_adj_changed)
+        offset_adj_layout.addWidget(self.offset_x_adj)
+
+        self.offset_y_adj = QSpinBox()
+        self.offset_y_adj.setRange(-9999, 9999)
+        self.offset_y_adj.setValue(0)
+        self.offset_y_adj.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.offset_y_adj.setPrefix("V: ")
+        self.offset_y_adj.valueChanged.connect(self._on_offset_adj_changed)
+        offset_adj_layout.addWidget(self.offset_y_adj)
+
+        offset_adj_container.hide()
+        self.offset_adj_container = offset_adj_container
+        seleccion_layout.addWidget(offset_adj_container)
 
         # Botones de modo manual (ocultos por defecto)
         self.remove_btn = QPushButton("Remover marca")
@@ -948,6 +978,8 @@ class SlideshowViewer(QDialog):
             self.manual_overlay_label.show()
             self.alpha_adjust.show()
             self.label_alpha_adj.show()
+            self.label_offset_adj.show()
+            self.offset_adj_container.show()
             self.remove_btn.show()
             self._log("🔍 Modo selección manual activado")
         else:
@@ -956,6 +988,8 @@ class SlideshowViewer(QDialog):
             self.manual_overlay_label.hide()
             self.alpha_adjust.hide()
             self.label_alpha_adj.hide()
+            self.label_offset_adj.hide()
+            self.offset_adj_container.hide()
             self.remove_btn.hide()
             self.accept_btn.hide()
             self.revert_btn.hide()
@@ -1027,21 +1061,40 @@ class SlideshowViewer(QDialog):
             watermark_file = self.watermark_files[self.current_event_watermark_index]
             watermark = load_images_cv2(watermark_file)
 
-            # Recalcular preview desde la base con nuevo alpha
+            # Recalcular preview desde la base con nuevo alpha y offset actual
             best_x, best_y = self.current_event_position
             self.preview_image = remove_watermark(
-                self.base_image_for_preview,  # Siempre desde la base
+                self.base_image_for_preview,
                 watermark,
-                best_x,
-                best_y,
-                alpha_adjust=value  # Nuevo valor de alpha
+                best_x + self.offset_x_adj.value(),
+                best_y + self.offset_y_adj.value(),
+                alpha_adjust=value
             )
-
-            # Actualizar display
             self._apply_zoom()
 
         except Exception as e:
             self._log(f"❌ Error recalculando preview: {e}")
+
+    def _on_offset_adj_changed(self):
+        """Recalcula el preview cuando cambia el ajuste de posición."""
+        if not self.is_preview_active:
+            return
+        if self.current_event_position is None or self.current_event_watermark_index is None:
+            return
+        try:
+            watermark_file = self.watermark_files[self.current_event_watermark_index]
+            watermark = load_images_cv2(watermark_file)
+            best_x, best_y = self.current_event_position
+            self.preview_image = remove_watermark(
+                self.base_image_for_preview,
+                watermark,
+                best_x + self.offset_x_adj.value(),
+                best_y + self.offset_y_adj.value(),
+                alpha_adjust=self.alpha_adjust.value()
+            )
+            self._apply_zoom()
+        except Exception as e:
+            self._log(f"❌ Error recalculando preview (offset): {e}")
 
     def _remove_watermark_preview(self):
         """Crea un preview removiendo la marca de agua en la posición del cursor. Sistema de eventos atómicos."""
@@ -1094,15 +1147,22 @@ class SlideshowViewer(QDialog):
                 use_gpu=True
             )
             self.current_event_position = (best_x, best_y)
-
             self._log(f"✅ Mejor coincidencia en ({best_x}, {best_y})")
 
-            # Crear preview con alpha actual
+            # Resetear ajuste de posición para cada nueva detección
+            self.offset_x_adj.blockSignals(True)
+            self.offset_y_adj.blockSignals(True)
+            self.offset_x_adj.setValue(0)
+            self.offset_y_adj.setValue(0)
+            self.offset_x_adj.blockSignals(False)
+            self.offset_y_adj.blockSignals(False)
+
+            # Crear preview con alpha y offset actuales
             self.preview_image = remove_watermark(
                 self.base_image_for_preview,
                 watermark,
-                best_x,
-                best_y,
+                best_x + self.offset_x_adj.value(),
+                best_y + self.offset_y_adj.value(),
                 alpha_adjust=self.alpha_adjust.value()
             )
 
