@@ -42,4 +42,5 @@ jobs:
           name: "SmartStitch WR ${{ steps.version.outputs.VERSION }}"
           body_path: .github/workflows/release_text.txt
           files: "SmartStitch WR-*.zip"
+          prerelease: ${{ contains(github.ref_name, '-') }}
           token: ${{ secrets.GITHUB_TOKEN }}
