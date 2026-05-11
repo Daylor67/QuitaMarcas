@@ -91,6 +91,21 @@ def align_watermark(
     return x, y
 
 
+def get_content_bounds(image: np.ndarray, alpha_threshold: int = 0):
+    """
+    Bounding box del contenido visible (píxeles con alpha > threshold).
+    Devuelve (x_min, y_min, x_max, y_max, width, height) o None si todo es transparente.
+    """
+    alpha = image[..., 3]
+    mask = alpha > alpha_threshold
+    if not np.any(mask):
+        return None
+    ys, xs = np.where(mask)
+    x_min, x_max = int(xs.min()), int(xs.max())
+    y_min, y_max = int(ys.min()), int(ys.max())
+    return x_min, y_min, x_max, y_max, x_max - x_min + 1, y_max - y_min + 1
+
+
 def find_wm_gpu(
     image: np.ndarray,
     watermark: np.ndarray,
@@ -115,16 +130,22 @@ def find_wm_gpu(
     search_region = None
     try:
         h_img, w_img = image.shape[:2]
-        h_wm, w_wm = watermark.shape[:2]
+
+        # Recortar watermark al contenido visible para que el template matching
+        # no dependa del tamaño del canvas completo (que puede salir de la imagen)
+        bounds = get_content_bounds(watermark)
+        if bounds is None:
+            return None
+        cx_min, cy_min, cx_max, cy_max, w_content, h_content = bounds
+        wm_content = watermark[cy_min:cy_max + 1, cx_min:cx_max + 1]
 
         # Usar coordenadas especificadas o el centro
         centro_x = center_x if center_x is not None else w_img // 2
         centro_y = center_y if center_y is not None else h_img // 2
 
-        # El search debe cubrir al menos el tamaño de la marca,
-        # de lo contrario matchTemplate lanza assertion (img < templ)
-        half_w = max(radio, w_wm // 2 + 1)
-        half_h = max(radio, h_wm // 2 + 1)
+        # El search debe cubrir al menos el contenido visible de la marca
+        half_w = (w_content // 2 + radio)
+        half_h = (h_content // 2 + radio)
 
         # Extraer región de búsqueda de la imagen
         search_x_start = max(0, centro_x - half_w)
@@ -134,39 +155,31 @@ def find_wm_gpu(
 
         search_region = image[search_y_start:search_y_end, search_x_start:search_x_end]
 
-        # Si la imagen es más chica que la marca, no hay nada que hacer
-        if search_region.shape[0] < h_wm or search_region.shape[1] < w_wm:
+        if search_region.shape[0] < h_content or search_region.shape[1] < w_content:
             print(
                 f"find_wm_gpu: search ({search_region.shape[1]}x{search_region.shape[0]}) "
-                f"menor que watermark ({w_wm}x{h_wm}); abortando."
+                f"menor que contenido visible ({w_content}x{h_content}); abortando."
             )
             return None
 
-        # Preparar marca de agua para template matching
-        # Usar solo RGB, el alpha lo usaremos como máscara después
-        wm_rgb = watermark[:, :, :3]
-        wm_alpha = watermark[:, :, 3]
-
-        # Crear máscara donde la marca es visible
+        # Preparar template (solo contenido visible) + máscara
+        wm_rgb = wm_content[:, :, :3]
+        wm_alpha = wm_content[:, :, 3]
         mask = (wm_alpha > 25).astype(np.uint8) * 255
 
-        # Transferir a GPU (UMat)
+        # Template matching en GPU
         search_region_gpu = cv2.UMat(search_region)
         wm_rgb_gpu = cv2.UMat(wm_rgb)
         mask_gpu = cv2.UMat(mask)
 
-        # Template matching en GPU con máscara
         result = cv2.matchTemplate(search_region_gpu, wm_rgb_gpu, cv2.TM_SQDIFF, mask=mask_gpu)
-
-        # Traer resultado a CPU
         result_cpu = result.get()
-
-        # Encontrar mínimo (mejor coincidencia con SQDIFF)
         _, _, min_loc, _ = cv2.minMaxLoc(result_cpu)
 
-        # Convertir coordenadas locales a coordenadas globales
-        best_x = search_x_start + min_loc[0]
-        best_y = search_y_start + min_loc[1]
+        # min_loc es la posición del contenido recortado dentro de search_region.
+        # Restamos el offset del recorte para obtener la posición del PNG completo.
+        best_x = search_x_start + min_loc[0] - cx_min
+        best_y = search_y_start + min_loc[1] - cy_min
 
         return best_x, best_y
 

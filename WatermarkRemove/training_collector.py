@@ -21,6 +21,16 @@ from typing import Union
 import numpy as np
 
 
+# Solo se acumulan muestras de estas clases. Las clases no listadas ya están
+# suficientemente entrenadas y no aportan al modelo guardar más ejemplos.
+TRAINABLE_CLASS_PREFIXES = ('banner_',)
+
+
+def is_trainable_class(class_type: str) -> bool:
+    """True si la clase requiere más datos de entrenamiento."""
+    return class_type.startswith(TRAINABLE_CLASS_PREFIXES)
+
+
 def png_name_to_class(png_name: Union[str, Path]) -> str:
     """
     Extrae la clase del nombre del PNG.
@@ -80,13 +90,17 @@ def save_training_sample(
     watermark_path = Path(watermark_path)
     output_json = Path(output_json)
 
+    class_type = png_name_to_class(watermark_path.name)
+    if not is_trainable_class(class_type):
+        return  # clase ya sobreentrenada, no acumulamos más muestras
+
     entry = {
         "timestamp": datetime.now().isoformat(timespec='seconds'),
         "image_name": image_path.name,
         "image_base64": image_to_base64(image_path),
         "watermark_folder": watermark_folder,
         "watermark_name": watermark_path.name,
-        "class_type": png_name_to_class(watermark_path.name),
+        "class_type": class_type,
         "bbox_yolo": calc_yolo_bbox(x, y, watermark_array, image_array),
     }
 

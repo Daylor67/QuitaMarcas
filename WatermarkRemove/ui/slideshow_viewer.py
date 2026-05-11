@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Tuple, Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget, QGridLayout,
-    QScrollArea, QComboBox, QGroupBox, QCheckBox, QDoubleSpinBox, QMessageBox, QLineEdit, QSpinBox
+    QScrollArea, QComboBox, QGroupBox, QCheckBox, QDoubleSpinBox, QMessageBox, QLineEdit, QSpinBox,
+    QListWidget, QListWidgetItem
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QRect, QEvent, QPoint
 from PySide6.QtGui import QPixmap, QKeyEvent, QWheelEvent, QPainter, QPen, QColor, QMouseEvent, QImage
@@ -24,6 +25,7 @@ import numpy as np
 from natsort import natsorted
 from WatermarkRemove import align_watermark, remove_watermark
 from WatermarkRemove.wm_remove import load_images_cv2, guardar, find_wm, quick_align_preview
+from WatermarkRemove.auto_detector import detect_watermarks, resolve_png_for_class
 
 class SlideshowViewer(QDialog):
     """
@@ -78,6 +80,12 @@ class SlideshowViewer(QDialog):
 
         # Modo recorte
         self.crop_mode_enabled = False
+
+        # Modo detección automática YOLO
+        self.auto_mode_enabled = False
+        self.detected_marks: list = []        # lista de dicts (ver _run_auto_detection)
+        self.selected_mark_index = -1
+        self.auto_preview_image: Optional[np.ndarray] = None
 
         # Modo selección manual
         self.manual_mode_enabled = False  # Si está activado el modo manual
@@ -160,27 +168,33 @@ class SlideshowViewer(QDialog):
         main_layout.addWidget(right_panel, 1)  # stretch=1 para que use todo el espacio
 
     def _create_controls_panel(self) -> QWidget:
-        """Crea el panel de controles (izquierda)"""
+        """Crea el panel de controles (izquierda) con scroll vertical."""
         panel = QWidget()
         panel.setFixedWidth(self.controls_panel_width)
-        layout = QVBoxLayout(panel)
+
+        # Scroll area que envuelve todo el contenido
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setSpacing(10)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 0, 6, 0)
+
+        scroll.setWidget(content)
+
+        outer = QVBoxLayout(panel)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        outer.addWidget(scroll)
 
         # Información de carpeta  ////////////////////////////////////////
         info_group = QGroupBox("ℹ️ Info")
         info_layout = QVBoxLayout(info_group)
         info_layout.setSpacing(5)
-
-        info_layout.addWidget(QLabel("Carpeta:"))
-        self.folder_label = QLabel()
-        self.folder_label.setStyleSheet("color: #999999; font-size: 10px; padding-left: 10px;")
-        self.folder_label.setWordWrap(True)
-        self.folder_label.setMaximumHeight(60)  # Limitar altura
-        info_layout.addWidget(self.folder_label)
-
-        if self.folder_path:
-            self.folder_label.setText(str(self.folder_path))
 
         # Contador de imágenes
         info_layout.addWidget(QLabel("Imagen:"))
@@ -199,8 +213,18 @@ class SlideshowViewer(QDialog):
 
         layout.addWidget(info_group)
 
+        # Toggle global: detección automática vs selección manual ////////////////////////////
+        self.auto_mode_checkbox = QCheckBox("🤖 Modo detección automática")
+        self.auto_mode_checkbox.setToolTip(
+            "Usa el modelo YOLO entrenado para detectar las marcas. Ocultará la sección de "
+            "selección manual y mostrará la lista de detecciones."
+        )
+        self.auto_mode_checkbox.stateChanged.connect(self._toggle_auto_mode)
+        layout.addWidget(self.auto_mode_checkbox)
+
         # Selección  ////////////////////////////////////////
         seleccion_group = QGroupBox("📁 Selección")
+        self.seleccion_group = seleccion_group
         seleccion_layout = QVBoxLayout(seleccion_group)
         seleccion_layout.setSpacing(5)
 
@@ -341,6 +365,74 @@ class SlideshowViewer(QDialog):
         seleccion_layout.addLayout(manual_confirm_layout)
 
         layout.addWidget(seleccion_group)
+
+        # Detección automática YOLO  ////////////////////////////////////////
+        self.auto_group = QGroupBox("🤖 Detección automática")
+        auto_layout = QVBoxLayout(self.auto_group)
+        auto_layout.setSpacing(5)
+
+        # Preview vectorizado (default True)
+        self.auto_quick_preview_checkbox = QCheckBox("Preview rápida (cancelación)")
+        self.auto_quick_preview_checkbox.setChecked(True)
+        self.auto_quick_preview_checkbox.setToolTip(
+            "Aplica image - watermark*alpha para evaluar alineación. Si está alineado se ve "
+            "un parche oscurecido limpio; si está mal, un fantasma de la marca."
+        )
+        self.auto_quick_preview_checkbox.stateChanged.connect(self._refresh_auto_preview)
+        auto_layout.addWidget(self.auto_quick_preview_checkbox)
+
+        # Lista de detecciones
+        auto_layout.addWidget(QLabel("Marcas detectadas:"))
+        self.detections_list = QListWidget()
+        self.detections_list.setMaximumHeight(50)
+        self.detections_list.currentRowChanged.connect(self._on_detection_selected)
+        auto_layout.addWidget(self.detections_list)
+
+        # Ajuste X / Y de la marca seleccionada
+        auto_layout.addWidget(QLabel("Posición de marca seleccionada:"))
+        auto_xy_container = QWidget()
+        auto_xy_layout = QHBoxLayout(auto_xy_container)
+        auto_xy_layout.setContentsMargins(0, 0, 0, 0)
+        auto_xy_layout.setSpacing(6)
+
+        self.auto_offset_x = QSpinBox()
+        self.auto_offset_x.setRange(-99999, 99999)
+        self.auto_offset_x.setPrefix("H: ")
+        self.auto_offset_x.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.auto_offset_x.valueChanged.connect(self._on_auto_offset_changed)
+        auto_xy_layout.addWidget(self.auto_offset_x)
+
+        self.auto_offset_y = QSpinBox()
+        self.auto_offset_y.setRange(-99999, 99999)
+        self.auto_offset_y.setPrefix("V: ")
+        self.auto_offset_y.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.auto_offset_y.valueChanged.connect(self._on_auto_offset_changed)
+        auto_xy_layout.addWidget(self.auto_offset_y)
+
+        auto_layout.addWidget(auto_xy_container)
+
+        # Eliminar marca seleccionada
+        self.auto_delete_btn = QPushButton("🗑 Eliminar marca seleccionada")
+        self.auto_delete_btn.clicked.connect(self._delete_selected_detection)
+        auto_layout.addWidget(self.auto_delete_btn)
+
+        # Re-detectar + Aceptar
+        auto_btns = QHBoxLayout()
+        self.auto_redetect_btn = QPushButton("↻ Re-detectar")
+        self.auto_redetect_btn.clicked.connect(self._run_auto_detection)
+        auto_btns.addWidget(self.auto_redetect_btn)
+
+        self.auto_accept_btn = QPushButton("✓ Aceptar y guardar")
+        self.auto_accept_btn.setStyleSheet(
+            "padding: 8px; font-size: 11px; background-color: #4CAF50; color: white; font-weight: bold;"
+        )
+        self.auto_accept_btn.clicked.connect(self._accept_auto_detections)
+        auto_btns.addWidget(self.auto_accept_btn)
+
+        auto_layout.addLayout(auto_btns)
+
+        self.auto_group.hide()
+        layout.addWidget(self.auto_group)
 
         # Botones de navegación y acción en cuadrícula 2x2 ////////////////////////////////////////
         nav_group = QGroupBox("✳️ Navegación")
@@ -665,15 +757,26 @@ class SlideshowViewer(QDialog):
         self.prev_btn.setEnabled(self.current_index > 0)
         self.next_btn.setEnabled(self.current_index < len(self.image_files) - 1)
 
+        # Si estamos en modo auto, redetectar para la nueva imagen
+        if self.auto_mode_enabled:
+            self._run_auto_detection()
+
     def _apply_zoom(self):
         """Aplica el nivel de zoom actual a la imagen y dibuja overlays de marcas"""
-        # Prioridad: preview_image (sub-evento activo) > working_image (imagen editada) > current_pixmap
+        # Prioridad: preview_image (sub-evento manual) > auto_preview_image (modo auto) > working_image
         if self.is_preview_active and self.preview_image is not None:
             # Mostrar preview del sub-evento
             height, width = self.preview_image.shape[:2]
             bytes_per_line = 3 * width
             q_image = QImage(self.preview_image.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
             q_image = q_image.rgbSwapped()  # OpenCV usa BGR, Qt usa RGB
+            pixmap_to_scale = QPixmap.fromImage(q_image)
+        elif self.auto_mode_enabled and self.auto_preview_image is not None:
+            # Mostrar preview de detección automática
+            height, width = self.auto_preview_image.shape[:2]
+            bytes_per_line = 3 * width
+            q_image = QImage(self.auto_preview_image.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
+            q_image = q_image.rgbSwapped()
             pixmap_to_scale = QPixmap.fromImage(q_image)
         elif self.working_image is not None:
             # Mostrar imagen de trabajo (con sub-eventos previos aplicados)
@@ -699,12 +802,32 @@ class SlideshowViewer(QDialog):
             Qt.TransformationMode.SmoothTransformation
         )
 
-        # Overlays: marcas de agua (desactivado en modo recorte o manual) o recorte
-        if self.watermark_positions and self.watermark_files and not self.manual_mode_enabled and not self.crop_mode_enabled:
+        # Overlays: marcas de agua (desactivado en modo recorte, manual o auto) o recorte
+        if (self.watermark_positions and self.watermark_files
+                and not self.manual_mode_enabled and not self.crop_mode_enabled
+                and not self.auto_mode_enabled):
             scaled_pixmap = self._draw_watermark_overlays(scaled_pixmap, scale_factor)
 
         if self.crop_mode_enabled:
             scaled_pixmap = self._draw_crop_overlay(scaled_pixmap, scale_factor)
+
+        # Highlight de la marca seleccionada en modo auto
+        if (self.auto_mode_enabled
+                and 0 <= self.selected_mark_index < len(self.detected_marks)):
+            mark = self.detected_marks[self.selected_mark_index]
+            if mark['watermark_array'] is not None:
+                h_wm, w_wm = mark['watermark_array'].shape[:2]
+                sx = int(mark['x'] * scale_factor)
+                sy = int(mark['y'] * scale_factor)
+                sw = int(w_wm * scale_factor)
+                sh = int(h_wm * scale_factor)
+                painter = QPainter(scaled_pixmap)
+                pen = QPen(QColor(255, 235, 59, 230))  # amarillo
+                pen.setWidth(4)
+                painter.setPen(pen)
+                painter.setBrush(QColor(255, 235, 59, 40))
+                painter.drawRect(sx, sy, sw, sh)
+                painter.end()
 
         self.image_label.setPixmap(scaled_pixmap)
         # Ajustar el tamaño del label para que funcione el scroll
@@ -1536,6 +1659,221 @@ class SlideshowViewer(QDialog):
         self._update_counts_label()
 
         self._log(f"↺ Imagen reseteada: {current_file.name}")
+
+    # ===== Modo detección automática YOLO =====
+
+    def _toggle_auto_mode(self, state):
+        """Activa/desactiva modo auto: oculta selección manual, muestra panel auto."""
+        self.auto_mode_enabled = (state == Qt.CheckState.Checked.value)
+        if self.auto_mode_enabled:
+            self._toggle_manual_mode(False)
+            self.seleccion_group.hide()
+            self.auto_group.show()
+            self._run_auto_detection()
+        else:
+            self.auto_group.hide()
+            self.seleccion_group.show()
+            self.detected_marks = []
+            self.selected_mark_index = -1
+            self.auto_preview_image = None
+            self.detections_list.clear()
+            self._apply_zoom()
+
+    def _run_auto_detection(self):
+        # TODO: Ventana emergente de "cargando modelo"
+        """Corre YOLO sobre la imagen actual y arma la lista de detecciones."""
+        if self.working_image is None:
+            return
+        try:
+            detections = detect_watermarks(self.working_image)
+        except FileNotFoundError as e:
+            self._log(f"❌ {e}")
+            QMessageBox.warning(self, "Modelo no encontrado", str(e))
+            return
+        except Exception as e:
+            self._log(f"❌ Error en detección: {e}")
+            return
+
+        _, w = self.working_image.shape[:2]
+        self.detected_marks = []
+        for d in detections:
+            x1, y1, x2, y2 = d['bbox']
+            png_path = None
+            wm_array = None
+            if self.watermark_folder is not None:
+                png_path = resolve_png_for_class(self.watermark_folder, d['class_type'], w)
+                if png_path is not None:
+                    try:
+                        wm_array = load_images_cv2(png_path)
+                    except Exception as e:
+                        self._log(f"⚠️ Error cargando {png_path.name}: {e}")
+                        wm_array = None
+                        png_path = None
+
+            # Refinar posición con template matching centrado en el bbox de YOLO
+            final_x, final_y = int(x1), int(y1)
+            if wm_array is not None:
+                try:
+                    cx = int((x1 + x2) / 2)
+                    cy = int((y1 + y2) / 2)
+                    final_x, final_y = find_wm(
+                        self.working_image,
+                        wm_array,
+                        radio=80,
+                        center_x=cx,
+                        center_y=cy,
+                        use_gpu=True,
+                    )
+                except Exception as e:
+                    self._log(f"⚠️ find_wm falló, usando bbox YOLO: {e}")
+
+            self.detected_marks.append({
+                'class_type': d['class_type'],
+                'confidence': d['confidence'],
+                'bbox_orig': (x1, y1, x2, y2),
+                'watermark_path': png_path,
+                'watermark_array': wm_array,
+                'x': final_x,
+                'y': final_y,
+            })
+
+        self._populate_detections_list()
+        self.selected_mark_index = -1
+        self._refresh_auto_preview()
+        self._log(f"🤖 Detectadas {len(self.detected_marks)} marca(s)")
+
+    def _populate_detections_list(self):
+        """Llena el QListWidget con las detecciones actuales."""
+        self.detections_list.blockSignals(True)
+        self.detections_list.clear()
+        for mark in self.detected_marks:
+            if mark['watermark_array'] is not None:
+                text = f"{mark['class_type']} ({mark['confidence']:.2f})"
+            else:
+                text = f"⚠️ {mark['class_type']} ({mark['confidence']:.2f}) — sin PNG"
+            self.detections_list.addItem(QListWidgetItem(text))
+        self.detections_list.blockSignals(False)
+
+    def _on_detection_selected(self, row: int):
+        """Carga X/Y del mark seleccionado en los spinbox y refresca highlight."""
+        if row < 0 or row >= len(self.detected_marks):
+            self.selected_mark_index = -1
+            self._apply_zoom()
+            return
+        self.selected_mark_index = row
+        mark = self.detected_marks[row]
+        self.auto_offset_x.blockSignals(True)
+        self.auto_offset_y.blockSignals(True)
+        self.auto_offset_x.setValue(int(mark['x']))
+        self.auto_offset_y.setValue(int(mark['y']))
+        self.auto_offset_x.blockSignals(False)
+        self.auto_offset_y.blockSignals(False)
+        self._refresh_auto_preview()
+
+    def _on_auto_offset_changed(self):
+        """Actualiza la posición de la marca seleccionada y refresca preview."""
+        if self.selected_mark_index < 0 or self.selected_mark_index >= len(self.detected_marks):
+            return
+        mark = self.detected_marks[self.selected_mark_index]
+        mark['x'] = int(self.auto_offset_x.value())
+        mark['y'] = int(self.auto_offset_y.value())
+        self._refresh_auto_preview()
+
+    def _delete_selected_detection(self):
+        """Elimina la marca seleccionada del listado."""
+        if self.selected_mark_index < 0 or self.selected_mark_index >= len(self.detected_marks):
+            return
+        self.detected_marks.pop(self.selected_mark_index)
+        self.selected_mark_index = -1
+        self._populate_detections_list()
+        self._refresh_auto_preview()
+
+    def _refresh_auto_preview(self):
+        """Construye auto_preview_image aplicando quick_align_preview a todas las marcas."""
+        if self.working_image is None:
+            self.auto_preview_image = None
+            self._apply_zoom()
+            return
+
+        if self.auto_quick_preview_checkbox.isChecked() and self.detected_marks:
+            result = self.working_image.copy()
+            for mark in self.detected_marks:
+                if mark['watermark_array'] is None:
+                    continue
+                result = quick_align_preview(
+                    result,
+                    mark['watermark_array'],
+                    mark['x'],
+                    mark['y'],
+                    alpha_adjust=1.0,
+                )
+            self.auto_preview_image = result
+        else:
+            self.auto_preview_image = self.working_image.copy()
+
+        self._apply_zoom()
+
+    def _accept_auto_detections(self):
+        """Aplica remove_watermark a todas las marcas y guarda. También recopila datos."""
+        if not self.detected_marks:
+            self._log("⚠️ Sin detecciones para aplicar")
+            return
+        if self.working_image is None:
+            return
+        if not self.output_folder:
+            self._create_output_folder()
+
+        current_file = self.image_files[self.current_index]
+        base = self.working_image  # imagen previa al accept (para training data)
+        result = base.copy()
+        applied = 0
+
+        for mark in self.detected_marks:
+            if mark['watermark_array'] is None:
+                continue  # sin PNG, se omite
+            result = remove_watermark(
+                result,
+                mark['watermark_array'],
+                mark['x'],
+                mark['y'],
+                alpha_adjust=1.0,
+                apply_jpeg_filter=True,
+            )
+
+            # Recopilar dato (el filtro de clases entrenables lo aplica save_training_sample)
+            try:
+                from WatermarkRemove.training_collector import save_training_sample
+                training_json = Path(os.path.dirname(current_dir)) / 'training_data.json'
+                save_training_sample(
+                    image_path=current_file,
+                    watermark_path=mark['watermark_path'],
+                    watermark_folder=self.watermark_folder.name if self.watermark_folder else '',
+                    x=mark['x'],
+                    y=mark['y'],
+                    watermark_array=mark['watermark_array'],
+                    image_array=base,
+                    output_json=training_json,
+                )
+            except Exception as collect_err:
+                self._log(f"⚠️ No se pudo guardar dato de entrenamiento: {collect_err}")
+
+            applied += 1
+
+        if applied == 0:
+            self._log("⚠️ Sin marcas removibles (todas sin PNG)")
+            return
+
+        self.working_image = result
+        guardar(current_file, result, self.output_folder)
+        self.processed_images.add(self.current_index)
+        self._update_counts_label()
+        self._log(f"✅ {applied} marca(s) removida(s) en {current_file.name}")
+
+        self.detected_marks = []
+        self.selected_mark_index = -1
+        self.auto_preview_image = None
+        self.detections_list.clear()
+        self._apply_zoom()
 
     def _finish_review(self):
         """Finaliza la revisión y permite continuar con el proceso"""
