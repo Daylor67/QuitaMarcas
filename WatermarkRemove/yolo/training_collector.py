@@ -23,12 +23,12 @@ import numpy as np
 
 # Solo se acumulan muestras de estas clases. Las clases no listadas ya están
 # suficientemente entrenadas y no aportan al modelo guardar más ejemplos.
-TRAINABLE_CLASS_PREFIXES = ('banner_',)
+TRAINABLE_CLASS = ('alto', 'apunta', 'texto')
 
 
 def is_trainable_class(class_type: str) -> bool:
     """True si la clase requiere más datos de entrenamiento."""
-    return class_type.startswith(TRAINABLE_CLASS_PREFIXES)
+    return class_type in TRAINABLE_CLASS
 
 
 def png_name_to_class(png_name: Union[str, Path]) -> str:

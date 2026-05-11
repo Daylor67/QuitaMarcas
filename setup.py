@@ -11,6 +11,7 @@ include_files = [
     ("assets", "lib/assets"),
     ("gui/layout.ui", "lib/gui/layout.ui"),
     ("WatermarkRemove/marcas", "lib/WatermarkRemove/marcas"),
+    ("WatermarkRemove/yolo/best.onnx", "lib/WatermarkRemove/yolo/best.onnx"),
 ]
 
 # Paquetes que deben incluirse explícitamente
@@ -27,6 +28,7 @@ packages = [
     "zipfile",
     "tempfile",
     "subprocess",
+    "onnxruntime",
 ]
 
 # Módulos que deben incluirse
@@ -66,6 +68,9 @@ excludes = [
     "unittest",
     "test",
     "setuptools",
+    "torch", 
+    "torchvision", 
+    "ultralytics",
 ]
 
 # Opciones de build

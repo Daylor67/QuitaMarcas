@@ -25,7 +25,7 @@ import numpy as np
 from natsort import natsorted
 from WatermarkRemove import align_watermark, remove_watermark
 from WatermarkRemove.wm_remove import load_images_cv2, guardar, find_wm, quick_align_preview
-from WatermarkRemove.auto_detector import detect_watermarks, resolve_png_for_class
+from WatermarkRemove.yolo.auto_detector import detect_watermarks, resolve_png_for_class
 
 class SlideshowViewer(QDialog):
     """
@@ -1528,7 +1528,7 @@ class SlideshowViewer(QDialog):
 
             # Recopilar dato de entrenamiento YOLO (no debe interrumpir la remoción si falla)
             try:
-                from WatermarkRemove.training_collector import save_training_sample
+                from WatermarkRemove.yolo.training_collector import save_training_sample
                 wm_file = self.watermark_files[self.current_event_watermark_index]
                 training_json = Path(os.path.dirname(current_dir)) / 'training_data.json'
                 save_training_sample(
@@ -1650,7 +1650,7 @@ class SlideshowViewer(QDialog):
         self.processed_positions.pop(self.current_index, None)
 
         # Limpiar entradas de training_data.json para esta imagen
-        from WatermarkRemove.training_collector import remove_training_sample
+        from WatermarkRemove.yolo.training_collector import remove_training_sample
         remove_training_sample(current_dir, current_file, self._log)
         
         # Recargar imagen original
@@ -1842,7 +1842,7 @@ class SlideshowViewer(QDialog):
 
             # Recopilar dato (el filtro de clases entrenables lo aplica save_training_sample)
             try:
-                from WatermarkRemove.training_collector import save_training_sample
+                from WatermarkRemove.yolo.training_collector import save_training_sample
                 training_json = Path(os.path.dirname(current_dir)) / 'training_data.json'
                 save_training_sample(
                     image_path=current_file,
