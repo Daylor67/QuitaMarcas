@@ -285,12 +285,16 @@ class SlideshowViewer(QDialog):
         self.quick_preview_checkbox.hide()
         seleccion_layout.addWidget(self.quick_preview_checkbox)
 
-        # Botones de modo manual (ocultos por defecto)
-        self.remove_btn = QPushButton("Remover marca")
-        self.remove_btn.clicked.connect(self._remove_watermark_preview)
-        self.remove_btn.setStyleSheet("padding: 8px; font-size: 11px; background-color: #FF9800; color: white; font-weight: bold;")
-        self.remove_btn.hide()
-        seleccion_layout.addWidget(self.remove_btn)
+        # Botón de reset: deshace todas las remociones de la imagen actual
+        self.reset_btn = QPushButton("↺ Resetear imagen")
+        self.reset_btn.setToolTip(
+            "Deshace todas las remociones de la imagen actual: borra el archivo procesado, "
+            "limpia las posiciones marcadas y elimina las entradas de entrenamiento asociadas."
+        )
+        self.reset_btn.clicked.connect(self._reset_current_image)
+        self.reset_btn.setStyleSheet("padding: 8px; font-size: 11px; background-color: #FF9800; color: white; font-weight: bold;")
+        self.reset_btn.hide()
+        seleccion_layout.addWidget(self.reset_btn)
 
         # Botones de confirmación (ocultos por defecto)
         manual_confirm_layout = QHBoxLayout()
@@ -1115,7 +1119,7 @@ class SlideshowViewer(QDialog):
             self.label_offset_adj.show()
             self.offset_adj_container.show()
             self.quick_preview_checkbox.show()
-            self.remove_btn.show()
+            self.reset_btn.show()
             self._log("🔍 Modo selección manual activado")
         else:
             # Desactivar modo manual
@@ -1126,7 +1130,7 @@ class SlideshowViewer(QDialog):
             self.label_offset_adj.hide()
             self.offset_adj_container.hide()
             self.quick_preview_checkbox.hide()
-            self.remove_btn.hide()
+            self.reset_btn.hide()
             self.accept_btn.hide()
             self.revert_btn.hide()
             # Limpiar estado
@@ -1316,7 +1320,7 @@ class SlideshowViewer(QDialog):
             self.watermark_combo.setEnabled(False)
 
             # Mostrar botones
-            self.remove_btn.hide()
+            self.reset_btn.hide()
             self.accept_btn.show()
             self.revert_btn.show()
 
@@ -1373,7 +1377,7 @@ class SlideshowViewer(QDialog):
             # Restaurar botones
             self.accept_btn.hide()
             self.revert_btn.hide()
-            self.remove_btn.show()
+            self.reset_btn.show()
 
             # Refrescar display: ahora se muestra working_image (con filtro JPEG aplicado)
             self._apply_zoom()
@@ -1417,6 +1421,54 @@ class SlideshowViewer(QDialog):
 
         # Log
         self._log(f"↩️ Evento descartado")
+
+    def _reset_current_image(self):
+        """
+        Deshace todas las remociones de la imagen actual:
+        - Cancela preview activo si lo hay
+        - Borra el archivo procesado en output_folder
+        - Quita el índice de processed_images / processed_positions
+        - Elimina entries del training_data.json para esta imagen
+        - Recarga working_image desde el original y refresca display
+        """
+        if not self.image_files:
+            return
+
+        current_file = self.image_files[self.current_index]
+
+        reply = QMessageBox.question(
+            self,
+            "Resetear imagen",
+            f"¿Resetear '{current_file.name}'?\n\n"
+            "Se borrará el archivo procesado y los datos de entrenamiento asociados.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # Cancelar preview activo (si lo hay)
+        if self.is_preview_active:
+            self._revert_preview()
+
+        # Borrar el archivo procesado
+        if self.output_folder:
+            output_file = self.output_folder / current_file.name
+            if output_file.exists():
+                try:
+                    output_file.unlink()
+                except Exception as e:
+                    self._log(f"⚠️ No se pudo borrar {output_file.name}: {e}")
+
+        # Quitar marcadores de procesamiento
+        self.processed_images.discard(self.current_index)
+        self.processed_positions.pop(self.current_index, None)
+        
+        # Recargar imagen original
+        self.working_image = load_images_cv2(current_file)
+        self._show_current_image()
+        self._update_counts_label()
+
+        self._log(f"↺ Imagen reseteada: {current_file.name}")
 
     def _finish_review(self):
         """Finaliza la revisión y permite continuar con el proceso"""
