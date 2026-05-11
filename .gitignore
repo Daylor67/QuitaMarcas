@@ -12,3 +12,4 @@ __settings__/
 !/WatermarkRemove/marcas/.gitkeep
 WatermarkRemove/wm_positions.json
 *_old.py
+training_data.json

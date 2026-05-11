@@ -104,6 +104,32 @@ class SlideshowViewer(QDialog):
         if self.image_files:
             self._show_current_image()
 
+    def _update_counts_label(self):
+        """Lee training_data.json y actualiza el conteo de muestras por clase."""
+        import json as _json
+
+        training_json = Path(os.path.dirname(current_dir)) / 'training_data.json'
+        try:
+            if not training_json.exists():
+                self.training_counts_label.setText("Sin datos aún")
+                return
+            data = _json.loads(training_json.read_text(encoding='utf-8'))
+            if not data:
+                self.training_counts_label.setText("Sin datos aún")
+                return
+
+            counts: dict = {}
+            for entry in data:
+                cls = entry.get('class_type', '?')
+                counts[cls] = counts.get(cls, 0) + 1
+
+            lines = [f"{cls}: {n}" for cls, n in sorted(counts.items())]
+            total = sum(counts.values())
+            lines.append(f"─────────\nTotal: {total}")
+            self.training_counts_label.setText("\n".join(lines))
+        except Exception:
+            self.training_counts_label.setText("Sin datos aún")
+
     def _log(self, message: str):
         """
         Registra un mensaje en la consola de proceso del watermark_tab.
@@ -348,6 +374,22 @@ class SlideshowViewer(QDialog):
         grid_layout.addWidget(self.cancel_btn, 1, 1)  # Fila 1, Columna 1
 
         layout.addWidget(nav_group)
+
+        # Conteo de datos de entrenamiento recopilados ////////////////////////////////////////
+        conteo_group = QGroupBox("📊 Datos recopilados")
+        conteo_layout = QVBoxLayout(conteo_group)
+        conteo_layout.setSpacing(4)
+        conteo_layout.setContentsMargins(8, 6, 8, 6)
+
+        self.training_counts_label = QLabel("Sin datos aún")
+        self.training_counts_label.setStyleSheet(
+            "color: #aaaaaa; font-size: 10px; font-family: monospace;"
+        )
+        self.training_counts_label.setWordWrap(True)
+        conteo_layout.addWidget(self.training_counts_label)
+
+        layout.addWidget(conteo_group)
+        self._update_counts_label()
 
         layout.addStretch(1)
 
@@ -1361,6 +1403,24 @@ class SlideshowViewer(QDialog):
             # Marcar como procesada
             self.processed_images.add(self.current_index)
 
+            # Recopilar dato de entrenamiento YOLO (no debe interrumpir la remoción si falla)
+            try:
+                from WatermarkRemove.training_collector import save_training_sample
+                wm_file = self.watermark_files[self.current_event_watermark_index]
+                training_json = Path(os.path.dirname(current_dir)) / 'training_data.json'
+                save_training_sample(
+                    image_path=current_file,
+                    watermark_path=wm_file,
+                    watermark_folder=self.watermark_folder.name,
+                    x=best_x + self.offset_x_adj.value(),
+                    y=best_y + self.offset_y_adj.value(),
+                    watermark_array=self.current_event_watermark,
+                    image_array=self.base_image_for_preview,
+                    output_json=training_json,
+                )
+            except Exception as collect_err:
+                self._log(f"⚠️ No se pudo guardar dato de entrenamiento: {collect_err}")
+
             # Limpiar state del sub-evento
             self.base_image_for_preview = None
             self.current_event_position = None
@@ -1381,6 +1441,9 @@ class SlideshowViewer(QDialog):
 
             # Refrescar display: ahora se muestra working_image (con filtro JPEG aplicado)
             self._apply_zoom()
+
+            # Actualizar conteo de datos de entrenamiento
+            self._update_counts_label()
 
             # Log
             self._log(f"✅ Evento guardado en {current_file.name}")
@@ -1414,7 +1477,7 @@ class SlideshowViewer(QDialog):
         # Restaurar botones
         self.accept_btn.hide()
         self.revert_btn.hide()
-        self.remove_btn.show()
+        self.reset_btn.show()
 
         # Mostrar working_image (con sub-eventos previos aplicados)
         self._apply_zoom()
@@ -1462,6 +1525,10 @@ class SlideshowViewer(QDialog):
         # Quitar marcadores de procesamiento
         self.processed_images.discard(self.current_index)
         self.processed_positions.pop(self.current_index, None)
+
+        # Limpiar entradas de training_data.json para esta imagen
+        from WatermarkRemove.training_collector import remove_training_sample
+        remove_training_sample(current_dir, current_file, self._log)
         
         # Recargar imagen original
         self.working_image = load_images_cv2(current_file)
