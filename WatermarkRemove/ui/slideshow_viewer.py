@@ -412,23 +412,32 @@ class SlideshowViewer(QDialog):
         auto_layout.addWidget(auto_xy_container)
 
         # Eliminar marca seleccionada
-        self.auto_delete_btn = QPushButton("🗑 Eliminar marca seleccionada")
+        file1 = QHBoxLayout()
+        self.auto_delete_btn = QPushButton("🗑 Eliminar")
         self.auto_delete_btn.clicked.connect(self._delete_selected_detection)
-        auto_layout.addWidget(self.auto_delete_btn)
+        file1.addWidget(self.auto_delete_btn)
 
-        # Re-detectar + Aceptar
-        auto_btns = QHBoxLayout()
         self.auto_redetect_btn = QPushButton("↻ Re-detectar")
         self.auto_redetect_btn.clicked.connect(self._run_auto_detection)
-        auto_btns.addWidget(self.auto_redetect_btn)
+        file1.addWidget(self.auto_redetect_btn)
 
-        self.auto_accept_btn = QPushButton("✓ Aceptar y guardar")
+        auto_btns = QHBoxLayout()
+        self.auto_accept_btn = QPushButton("✓ Guardar")
         self.auto_accept_btn.setStyleSheet(
             "padding: 8px; font-size: 11px; background-color: #4CAF50; color: white; font-weight: bold;"
         )
         self.auto_accept_btn.clicked.connect(self._accept_auto_detections)
         auto_btns.addWidget(self.auto_accept_btn)
 
+        self.auto_accept_next_btn = QPushButton("✓ Guardar y Siguiente")
+        self.auto_accept_next_btn.setStyleSheet(
+            "padding: 8px; font-size: 11px; background-color: #4c7faf; color: white; font-weight: bold;"
+        )
+        self.auto_accept_next_btn.clicked.connect(self._accept_auto_detections)
+        self.auto_accept_next_btn.clicked.connect(self._next_image)
+        auto_btns.addWidget(self.auto_accept_next_btn)
+        
+        auto_layout.addLayout(file1)
         auto_layout.addLayout(auto_btns)
 
         self.auto_group.hide()
