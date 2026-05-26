@@ -16,7 +16,6 @@ parent_dir = os.path.dirname(os.path.dirname(current_dir))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-from utils import UtilJson
 from .image_viewer import ImageViewer
 from .position_editor import PositionEditor
 
