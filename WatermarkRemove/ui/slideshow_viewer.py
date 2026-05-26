@@ -20,7 +20,7 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 from utils import UtilJson
-from core.utils.constants import SETTINGS_REL_DIR
+from WatermarkRemove.services import wm_persistence
 import numpy as np
 from natsort import natsorted
 from WatermarkRemove import align_watermark, remove_watermark
@@ -259,7 +259,7 @@ class SlideshowViewer(QDialog):
         self.crop_pixels_input.setSuffix(" px")
         self.crop_pixels_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # Cargar último valor persistido en settings
-        saved_crop = UtilJson(os.path.join(SETTINGS_REL_DIR, 'settings.json')).get('last_crop_pixels', 0) or 0
+        saved_crop = wm_persistence.get_last_crop_pixels()
         self.crop_pixels_input.setValue(int(saved_crop))
         self.crop_pixels_input.valueChanged.connect(self._on_crop_pixels_changed)
         self.crop_pixels_input.hide()
@@ -602,7 +602,7 @@ class SlideshowViewer(QDialog):
             self.watermark_folder_combo.addItem(folder.name, str(folder))
 
         # Usar la última carpeta guardada en settings
-        folder_to_select = UtilJson(os.path.join(SETTINGS_REL_DIR, 'settings.json')).get('last_watermark_folder', None)
+        folder_to_select = wm_persistence.get_last_watermark_folder()
 
         if folder_to_select:
             index = self.watermark_folder_combo.findText(folder_to_select)
@@ -628,7 +628,7 @@ class SlideshowViewer(QDialog):
             self._load_watermark_positions()
 
             # Guardar como última carpeta usada
-            UtilJson(os.path.join(SETTINGS_REL_DIR, 'settings.json')).set('last_watermark_folder', folder_name)
+            wm_persistence.set_last_watermark_folder(folder_name)
 
             # Crear carpeta de salida si aún no existe
             if not self.output_folder and self.folder_path:
@@ -862,7 +862,7 @@ class SlideshowViewer(QDialog):
 
     def _on_crop_pixels_changed(self, value):
         """Actualiza el overlay y persiste el valor en settings."""
-        UtilJson(os.path.join(SETTINGS_REL_DIR, 'settings.json')).set('last_crop_pixels', int(value))
+        wm_persistence.set_last_crop_pixels(value)
         if self.crop_mode_enabled:
             self._apply_zoom()
 
