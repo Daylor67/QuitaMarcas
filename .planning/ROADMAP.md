@@ -12,7 +12,7 @@ Esta refactorización transforma el módulo `WatermarkRemove/` de un monolito ce
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: JSON Persistence** - Unificar SettingsHandler y UtilJson en un único servicio de persistencia
+- [x] **Phase 1: JSON Persistence** - Unificar SettingsHandler y UtilJson en un único servicio de persistencia (completed 2026-05-26)
 - [ ] **Phase 2: SlideshowViewer Decomposition** - Descomponer el God Class en componentes de responsabilidad única
 - [ ] **Phase 3: Logic/Widget Separation** - Separar lógica de negocio de widgets y convertir WatermarkTab en coordinador puro
 - [ ] **Phase 4: Visual Polish** - Rebalancear layout, reorganizar controles y aplicar estilo consistente con SmartStitch
@@ -36,7 +36,7 @@ Plans:
 - [x] 01-01-PLAN.md — Auditar UtilJson call sites y producir contrato del servicio WmPersistenceService
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 01-02-PLAN.md — Crear WmPersistenceService en services/ y migrar 4 call sites en slideshow_viewer.py
+- [x] 01-02-PLAN.md — Crear WmPersistenceService en services/ y migrar 4 call sites en slideshow_viewer.py
 
 **Cross-cutting constraints:**
 - D-03: wm_positions.json no se toca — solo migran last_crop_pixels y last_watermark_folder
@@ -98,7 +98,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. JSON Persistence | 1/2 | In Progress|  |
+| 1. JSON Persistence | 2/2 | Complete   | 2026-05-26 |
 | 2. SlideshowViewer Decomposition | 0/3 | Not started | - |
 | 3. Logic/Widget Separation | 0/2 | Not started | - |
 | 4. Visual Polish | 0/3 | Not started | - |
