@@ -31,8 +31,15 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 2 plans
 
 Plans:
+
+**Wave 1**
 - [ ] 01-01-PLAN.md — Auditar UtilJson call sites y producir contrato del servicio WmPersistenceService
+
+**Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 01-02-PLAN.md — Crear WmPersistenceService en services/ y migrar 4 call sites en slideshow_viewer.py
+
+**Cross-cutting constraints:**
+- D-03: wm_positions.json no se toca — solo migran last_crop_pixels y last_watermark_folder
 
 ### Phase 2: SlideshowViewer Decomposition
 **Goal**: SlideshowViewer ya no es un God Class — sus responsabilidades están distribuidas en componentes con propósito único
