@@ -28,11 +28,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Los archivos `wm_positions.json` y `training_data.json` se cargan y guardan correctamente con el servicio unificado
   3. El módulo principal `SmartStitchGUI.py` sigue funcionando sin cambios — la API pública de persistencia no se rompió
   4. No hay regresión en la carga/guardado de settings cuando se abre y cierra la aplicación
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 01-01: Auditar SettingsHandler vs UtilJson — mapear overlaps y diferencias
-- [ ] 01-02: Crear servicio unificado y migrar llamadas en WatermarkRemove/
+- [ ] 01-01-PLAN.md — Auditar UtilJson call sites y producir contrato del servicio WmPersistenceService
+- [ ] 01-02-PLAN.md — Crear WmPersistenceService en services/ y migrar 4 call sites en slideshow_viewer.py
 
 ### Phase 2: SlideshowViewer Decomposition
 **Goal**: SlideshowViewer ya no es un God Class — sus responsabilidades están distribuidas en componentes con propósito único
