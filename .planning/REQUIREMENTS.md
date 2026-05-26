@@ -45,13 +45,13 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ARCH-03 | Phase 1 | Pending |
-| ARCH-01 | Phase 2 | Pending |
-| ARCH-02 | Phase 2 | Pending |
-| ARCH-04 | Phase 3 | Pending |
-| UI-01 | Phase 4 | Pending |
-| UI-02 | Phase 4 | Pending |
-| UI-03 | Phase 4 | Pending |
+| ARCH-03 | Phase 1 — JSON Persistence | Pending |
+| ARCH-01 | Phase 2 — SlideshowViewer Decomposition | Pending |
+| ARCH-02 | Phase 3 — Logic/Widget Separation | Pending |
+| ARCH-04 | Phase 3 — Logic/Widget Separation | Pending |
+| UI-01 | Phase 4 — Visual Polish | Pending |
+| UI-02 | Phase 4 — Visual Polish | Pending |
+| UI-03 | Phase 4 — Visual Polish | Pending |
 
 **Coverage:**
 - v1 requirements: 7 total
@@ -60,4 +60,4 @@
 
 ---
 *Requirements defined: 2026-05-26*
-*Last updated: 2026-05-26 after initial definition*
+*Last updated: 2026-05-26 — traceability aligned with ROADMAP.md*

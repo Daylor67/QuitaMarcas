@@ -1,0 +1,97 @@
+# Roadmap: SmartStitch — WatermarkRemove Refactor
+
+## Overview
+
+Esta refactorización transforma el módulo `WatermarkRemove/` de un monolito centrado en `SlideshowViewer` (God Class de 63 edges) hacia una arquitectura limpia con responsabilidades separadas, terminando con una interfaz visual coherente con el resto de SmartStitch. Las fases siguen el principio arquitectura-primero: se limpia la estructura interna antes de tocar la presentación visual.
+
+## Phases
+
+**Phase Numbering:**
+- Integer phases (1, 2, 3): Planned milestone work
+- Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
+
+Decimal phases appear between their surrounding integers in numeric order.
+
+- [ ] **Phase 1: JSON Persistence** - Unificar SettingsHandler y UtilJson en un único servicio de persistencia
+- [ ] **Phase 2: SlideshowViewer Decomposition** - Descomponer el God Class en componentes de responsabilidad única
+- [ ] **Phase 3: Logic/Widget Separation** - Separar lógica de negocio de widgets y convertir WatermarkTab en coordinador puro
+- [ ] **Phase 4: Visual Polish** - Rebalancear layout, reorganizar controles y aplicar estilo consistente con SmartStitch
+
+## Phase Details
+
+### Phase 1: JSON Persistence
+**Goal**: El módulo tiene un único servicio de persistencia JSON — no hay código duplicado entre SettingsHandler y UtilJson
+**Depends on**: Nothing (first phase)
+**Requirements**: ARCH-03
+**Success Criteria** (what must be TRUE):
+  1. Toda llamada de lectura/escritura JSON en `WatermarkRemove/` usa el servicio unificado — no hay llamadas directas a UtilJson ni a SettingsHandler por separado
+  2. Los archivos `wm_positions.json` y `training_data.json` se cargan y guardan correctamente con el servicio unificado
+  3. El módulo principal `SmartStitchGUI.py` sigue funcionando sin cambios — la API pública de persistencia no se rompió
+  4. No hay regresión en la carga/guardado de settings cuando se abre y cierra la aplicación
+**Plans**: TBD
+
+Plans:
+- [ ] 01-01: Auditar SettingsHandler vs UtilJson — mapear overlaps y diferencias
+- [ ] 01-02: Crear servicio unificado y migrar llamadas en WatermarkRemove/
+
+### Phase 2: SlideshowViewer Decomposition
+**Goal**: SlideshowViewer ya no es un God Class — sus responsabilidades están distribuidas en componentes con propósito único
+**Depends on**: Phase 1
+**Requirements**: ARCH-01
+**Success Criteria** (what must be TRUE):
+  1. El visor slideshow navega imágenes con Space/Backspace sin que el widget tenga lógica de procesamiento inline
+  2. La detección YOLO/auto y la ejecución de `remove_watermark()` viven en componentes separados del widget de navegación
+  3. La recopilación de training data (save/remove sample) opera desde su propio componente sin acoplar el visor
+  4. SlideshowViewer tiene 20 o menos edges de dependencia directa (reducción desde 63 actuales)
+  5. El comportamiento observable del visor es idéntico al anterior — el usuario no nota ningún cambio funcional
+**Plans**: TBD
+
+Plans:
+- [ ] 02-01: Extraer componente de navegación (estado de índice, avance/retroceso, carga de imagen)
+- [ ] 02-02: Extraer componente de procesamiento de watermarks (lógica YOLO + remove_watermark)
+- [ ] 02-03: Extraer componente de training data collection y ensamblar en SlideshowViewer
+
+### Phase 3: Logic/Widget Separation
+**Goal**: Los widgets de WatermarkRemove solo coordinan y presentan — ninguna lógica de dominio vive dentro de un widget, y WatermarkTab es un coordinador puro
+**Depends on**: Phase 2
+**Requirements**: ARCH-02, ARCH-04
+**Success Criteria** (what must be TRUE):
+  1. `WatermarkTab.get_settings()` y `apply_settings()` siguen funcionando — SmartStitchGUI no requiere cambios
+  2. Ningún widget en `WatermarkRemove/ui/` contiene lógica de negocio inline — solo llamadas a servicios extraídos
+  3. WatermarkTab no orquesta lógica directamente: conecta señales de UI con servicios, sin condicionales de dominio propios
+  4. El flujo completo (abrir imágenes → detectar/remover watermark → guardar) sigue funcionando sin regresión
+**Plans**: TBD
+
+Plans:
+- [ ] 03-01: Extraer lógica de negocio residual de widgets (position_editor, image_viewer)
+- [ ] 03-02: Refactorizar WatermarkTab como coordinador puro — conectar servicios con señales UI
+
+### Phase 4: Visual Polish
+**Goal**: La interfaz de WatermarkRemove es visualmente coherente con SmartStitch y el visor de imagen domina el espacio disponible
+**Depends on**: Phase 3
+**Requirements**: UI-01, UI-02, UI-03
+**Success Criteria** (what must be TRUE):
+  1. El visor de imagen ocupa al menos el 65% del ancho de la ventana — los controles no compiten por espacio visual
+  2. Los controles están agrupados en cuatro secciones con separadores visuales: Navegación / Remoción / Auto-detección / Training
+  3. El tema dark, el acento `#26EE9F` y la tipografía son visualmente indistinguibles entre WatermarkRemove y el resto de SmartStitch
+  4. Un usuario nuevo puede identificar correctamente qué botón usa sin leer documentación — la jerarquía visual es obvia
+**Plans**: TBD
+
+Plans:
+- [ ] 04-01: Rebalancear layout (splitter/proporción visor vs panel de controles)
+- [ ] 04-02: Reorganizar controles en grupos funcionales con separadores visuales
+- [ ] 04-03: Aplicar QSS de gui/stylesheet.py — dark theme + acento teal consistente
+
+**UI hint**: yes
+
+## Progress
+
+**Execution Order:**
+Phases execute in numeric order: 1 → 2 → 3 → 4
+
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 1. JSON Persistence | 0/2 | Not started | - |
+| 2. SlideshowViewer Decomposition | 0/3 | Not started | - |
+| 3. Logic/Widget Separation | 0/2 | Not started | - |
+| 4. Visual Polish | 0/3 | Not started | - |
