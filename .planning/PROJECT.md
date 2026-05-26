@@ -25,7 +25,7 @@ El usuario puede revisar, remover marcas de agua y navegar imágenes sin que la 
 
 - [ ] **ARCH-01**: Descomponer `SlideshowViewer` en componentes de responsabilidad única
 - [ ] **ARCH-02**: Separar lógica de negocio de los widgets UI en `WatermarkRemove/`
-- [ ] **ARCH-03**: Unificar `SettingsHandler` y `UtilJson` (persistencia JSON duplicada)
+- [x] **ARCH-03**: Unificar `SettingsHandler` y `UtilJson` (persistencia JSON duplicada) — Validated in Phase 1
 - [ ] **UI-01**: Rebalancear proporción visor de imagen vs panel de controles
 - [ ] **UI-02**: Reorganizar controles con jerarquía visual clara
 - [ ] **UI-03**: Aplicar estilo visual consistente con SmartStitch GUI
@@ -79,4 +79,4 @@ Este documento evoluciona en transiciones de fase y milestones.
 3. Auditar Out of Scope — ¿razones siguen válidas?
 
 ---
-*Last updated: 2026-05-26 after initialization*
+*Last updated: 2026-05-26 after Phase 1 (JSON Persistence) completion*
