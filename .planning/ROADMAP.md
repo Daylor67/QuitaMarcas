@@ -33,7 +33,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 
 **Wave 1**
-- [ ] 01-01-PLAN.md — Auditar UtilJson call sites y producir contrato del servicio WmPersistenceService
+- [x] 01-01-PLAN.md — Auditar UtilJson call sites y producir contrato del servicio WmPersistenceService
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 01-02-PLAN.md — Crear WmPersistenceService en services/ y migrar 4 call sites en slideshow_viewer.py
@@ -98,7 +98,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. JSON Persistence | 0/2 | Not started | - |
+| 1. JSON Persistence | 1/2 | In Progress|  |
 | 2. SlideshowViewer Decomposition | 0/3 | Not started | - |
 | 3. Logic/Widget Separation | 0/2 | Not started | - |
 | 4. Visual Polish | 0/3 | Not started | - |
