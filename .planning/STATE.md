@@ -2,15 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-last_updated: "2026-05-26T21:09:22.059Z"
+status: ready_to_plan
+last_updated: 2026-05-26T21:34:20.876Z
 last_activity: 2026-05-26 -- Phase 1 execution started
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 2
-  completed_plans: 0
+  completed_plans: 2
   percent: 0
+stopped_at: Phase 1 complete (2/2) — ready to discuss Phase 2
 ---
 
 # Project State
@@ -20,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-26)
 
 **Core value:** El usuario puede revisar, remover marcas de agua y navegar imágenes sin que la UI se interponga — flujo fluido, controles claros, sin sorpresas.
-**Current focus:** Phase 1 — JSON Persistence
+**Current focus:** Phase 2 — slideshowviewer decomposition
 
 ## Current Position
 
-Phase: 1 (JSON Persistence) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 1
-Last activity: 2026-05-26 -- Phase 1 execution started
+Phase: 2
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-05-26
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -35,7 +36,7 @@ Progress: [░░░░░░░░░░] 0%
 
 **Velocity:**
 
-- Total plans completed: 0
+- Total plans completed: 2
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -43,7 +44,7 @@ Progress: [░░░░░░░░░░] 0%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 1 | 2 | - | - |
 
 **Recent Trend:**
 
