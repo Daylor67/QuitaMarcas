@@ -24,9 +24,9 @@ Signals publicas (declaradas al inicio de la clase):
 - counts_changed()                        -- training counts deben refrescarse (Plan 03 lo consume)
 
 Notas estructurales:
-- `components/` esta DOS niveles bajo el package root (PATTERNS line 648-656).
-  Por eso `wm_dir = os.path.dirname(os.path.dirname(__file__))` apunta a `WatermarkRemove/`
-  (en lugar de `os.path.dirname(current_dir)` que usaba el original en slideshow_viewer.py).
+- `components/` esta TRES niveles desde el archivo hacia `WatermarkRemove/`:
+  `dirname(__file__)` -> components/, `dirname*2` -> ui/, `dirname*3` -> WatermarkRemove/.
+  Usar `os.path.dirname(os.path.dirname(os.path.dirname(__file__)))` para `wm_dir`.
 - Defensivos load-bearing PRESERVADOS verbatim (RESEARCH Pitfall 3):
   - `blockSignals(True/False)` bracket en _load_watermark_folders + manual fire al final
   - `if hasattr(self, 'alpha_adjust'):` guard en _on_watermark_changed
@@ -495,11 +495,10 @@ class WatermarkProcessor(QWidget):
         self.watermark_folder_combo.blockSignals(True)
         self.watermark_folder_combo.clear()
 
-        # PATTERNS line 648-656: components/ esta dos niveles bajo el package root.
-        # `wm_dir = os.path.dirname(os.path.dirname(__file__))` reemplaza el
-        # original `wm_dir = os.path.dirname(current_dir)` del slideshow_viewer.py
-        # porque components/ esta un nivel mas profundo.
-        wm_dir = os.path.dirname(os.path.dirname(__file__))
+        # components/ esta TRES niveles bajo el archivo: components/ -> ui/ -> WatermarkRemove/
+        # dirname(__file__) elimina el nombre del archivo (da components/),
+        # luego dos dirname mas suben a ui/ y WatermarkRemove/ respectivamente.
+        wm_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         marcas_base_path = Path(wm_dir) / 'marcas'
 
         if not marcas_base_path.exists():
@@ -606,8 +605,8 @@ class WatermarkProcessor(QWidget):
             return
 
         try:
-            # PATTERNS line 648-656: components/ esta dos niveles bajo el package root.
-            wm_dir = os.path.dirname(os.path.dirname(__file__))
+            # components/ -> ui/ -> WatermarkRemove/ (tres dirname desde el archivo)
+            wm_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
             positions_path = Path(wm_dir) / 'wm_positions.json'
             if not positions_path.exists():
                 return
