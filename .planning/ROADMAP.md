@@ -59,7 +59,7 @@ Plans:
 - [x] 02-01-PLAN.md — Crear paquete components/ con stubs + extraer NavigationController (navegación, render, zoom, output_folder)
 
 **Wave 2** *(blocked on Wave 1)*
-- [ ] 02-02-PLAN.md — Extraer WatermarkProcessor (manual + auto YOLO + posiciones guardadas + crop + máquina de eventos atómicos) y restaurar overlays via signal/slot decorate_pixmap
+- [x] 02-02-PLAN.md — Extraer WatermarkProcessor (manual + auto YOLO + posiciones guardadas + crop + máquina de eventos atómicos) y restaurar overlays via signal/slot decorate_pixmap
 
 **Wave 3** *(blocked on Wave 2)*
 - [ ] 02-03-PLAN.md — Extraer TrainingDataCollector + reducir SlideshowViewer a composer puro + verificar edge count ≤20 (UAT manual + 02-EDGE-COUNT.md)
@@ -105,6 +105,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. JSON Persistence | 2/2 | Complete    | 2026-05-26 |
-| 2. SlideshowViewer Decomposition | 1/3 | In Progress|  |
+| 2. SlideshowViewer Decomposition | 2/3 | In Progress|  |
 | 3. Logic/Widget Separation | 0/2 | Not started | - |
 | 4. Visual Polish | 0/3 | Not started | - |
