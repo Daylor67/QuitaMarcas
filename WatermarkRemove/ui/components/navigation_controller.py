@@ -22,7 +22,7 @@ from typing import Optional, Tuple
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QScrollArea, QGroupBox, QSpinBox, QCheckBox
 )
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer, QEvent, QPoint
 from PySide6.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QWheelEvent
 
 import numpy as np
@@ -56,6 +56,13 @@ class NavigationController(QWidget):
     request_redraw = Signal()                      # Plan 02: pintura de overlays via slot
     window_resize_requested = Signal(int, int)     # (width, height) — composer (QDialog) ejecuta resize
     finish_requested = Signal()                    # navegacion llego al final
+    # === Plan 02-02 wiring: comunicacion con WatermarkProcessor ===
+    # image_clicked: (QPoint pos_in_image_label_coords, "left"|"right") — emitida cuando user click sobre image_label
+    image_clicked = Signal(object, str)
+    # mouse_moved: (QPoint pos_in_image_coords sin escala) — emitida en mouse move cuando manual mode tracking activo
+    mouse_moved = Signal(object)
+    # output_folder_request: el processor pide a navigation que cree output_folder
+    output_folder_request = Signal()
 
     SUPPORTED_FORMATS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.tga', '.psd', '.psb', '.jfif')
 
@@ -91,8 +98,18 @@ class NavigationController(QWidget):
         # Estado de preview (placeholder — el processor lo activa via slots en Plan 02)
         self._preview_image_from_processor: Optional[np.ndarray] = None
 
+        # Plan 02-02 wiring: callback al `decorate_pixmap` del processor
+        # Inicializado en None — el composer llama `set_processor_decorator(...)` tras instanciar
+        # el processor. Permite que el render del navigation invoque al processor para pintar
+        # overlays (cuadros rojo/verde + crop + highlight auto) sin coupling directo a la clase.
+        self._processor_decorate = None
+
         self._setup_ui()
         self._load_image_list()
+
+        # Instalar eventFilter sobre image_label para capturar clicks y mouse moves.
+        # El filter emite signals image_clicked / mouse_moved que el processor conecta.
+        self.image_label.installEventFilter(self)
 
         if self.image_files:
             self._show_current_image()
@@ -317,7 +334,13 @@ class NavigationController(QWidget):
             Qt.TransformationMode.SmoothTransformation
         )
 
-        # Emit por si algun componente quiere decorar el pixmap (Plan 02)
+        # Plan 02-02 wiring: el processor decora el pixmap con overlays
+        # (cuadros rojo/verde de posiciones, overlay de crop, highlight amarillo modo auto).
+        # Esto restaura la regresion temporal del Plan 01.
+        if self._processor_decorate is not None:
+            scaled_pixmap = self._processor_decorate(scaled_pixmap, scale_factor)
+
+        # Emit por si algun componente externo quiere reaccionar al re-render
         self.request_redraw.emit()
 
         self.image_label.setPixmap(scaled_pixmap)
@@ -481,10 +504,114 @@ class NavigationController(QWidget):
         self._apply_zoom()
 
     def reset_current_image(self):
-        """Plan 02/03 wiring: stub — sera implementado cuando el processor
-        extraiga _reset_current_image.
+        """Slot: el processor emitio image_reset (o request_image_reload).
+
+        Recarga working_image desde disco y refresca display. Tambien quita los
+        marcadores de processed_images/processed_positions para esta imagen.
         """
-        pass
+        if not self.image_files:
+            return
+        current_file = self.image_files[self.current_index]
+        self.working_image = load_images_cv2(current_file)
+        self.processed_images.discard(self.current_index)
+        self.processed_positions.pop(self.current_index, None)
+        self._preview_image_from_processor = None
+        self._show_current_image()
+
+    # ===================================================================
+    # Plan 02-02 wiring: slots publicos invocados por composer/processor
+    # ===================================================================
+    def set_processor_decorator(self, callback):
+        """Registra el callback `decorate_pixmap(pixmap, scale_factor) -> QPixmap`
+        del processor. El composer llama esto despues de instanciar el processor.
+
+        Permite que `_apply_zoom` invoque al processor para pintar overlays
+        sin coupling directo a la clase.
+        """
+        self._processor_decorate = callback
+
+    def set_mouse_tracking(self, enabled: bool):
+        """Slot: el processor activa/desactiva mouseTracking sobre image_label al
+        toggle del modo manual.
+        """
+        self.image_label.setMouseTracking(enabled)
+
+    def set_manual_overlay_visible(self, visible: bool):
+        """Slot: muestra/oculta el manual_overlay_label."""
+        if visible:
+            self.manual_overlay_label.show()
+        else:
+            self.manual_overlay_label.hide()
+
+    def set_manual_overlay_geometry(self, image_x: int, image_y: int, wm_width: int, wm_height: int):
+        """Slot: el processor pide reposicionar el manual_overlay_label.
+
+        El processor emite (image_x, image_y, wm_width, wm_height) en coords de imagen
+        SIN escala. Aqui se aplica el zoom_level y la conversion al scroll_area.
+        """
+        try:
+            scale_factor = self.zoom_level / 100.0
+            scaled_width = int(wm_width * scale_factor)
+            scaled_height = int(wm_height * scale_factor)
+            # image_x/y vienen en coords de imagen original (sin escala). Convertir a
+            # coords del image_label (con escala). El image_label esta dentro del scroll_area;
+            # el manual_overlay_label es hijo del scroll_area (no del image_label) — entonces
+            # debemos convertir las coords de imagen → coords del scroll_area.
+            scaled_x_on_label = int(image_x * scale_factor)
+            scaled_y_on_label = int(image_y * scale_factor)
+            # Punto en image_label, convertir a scroll_area
+            from PySide6.QtCore import QPoint as _QPoint
+            global_pos = self.image_label.mapToGlobal(_QPoint(scaled_x_on_label, scaled_y_on_label))
+            scroll_pos = self.scroll_area.mapFromGlobal(global_pos)
+            overlay_x = scroll_pos.x() - scaled_width // 2
+            overlay_y = scroll_pos.y() - scaled_height // 2
+            self.manual_overlay_label.setGeometry(overlay_x, overlay_y, scaled_width, scaled_height)
+            self.manual_overlay_label.raise_()
+        except Exception:
+            # No critico — un overlay desactualizado no rompe el flujo
+            pass
+
+    def on_position_processed(self, pos_name: str):
+        """Slot (futuro): el processor notifica que una posicion fue procesada.
+
+        Plan 02-02 mantiene processed_positions en navigation por compatibilidad
+        con el API publica. El processor pasa `pos_name` para que navigation
+        actualice el set local.
+        """
+        if pos_name:
+            self.processed_positions.setdefault(self.current_index, set()).add(pos_name)
+            self.processed_images.add(self.current_index)
+
+    # ===================================================================
+    # eventFilter — propaga clicks y mouse moves al processor via signals
+    # ===================================================================
+    def eventFilter(self, watched, event):
+        """Captura mouse events sobre image_label y los emite via signals.
+
+        - MouseMove (cuando mouseTracking esta activo, i.e. manual mode): emit
+          mouse_moved con coords de imagen (sin escala de zoom).
+        - MouseButtonPress (left/right): emit image_clicked con coords del image_label
+          (con escala). El processor recibe y decide accion segun modo activo.
+        """
+        if watched is self.image_label:
+            if event.type() == QEvent.Type.MouseMove:
+                # Convertir pos a coords de imagen (sin escala de zoom) — el processor
+                # las espera asi para alimentar mouse_position que despues compara con find_wm.
+                scale_factor = self.zoom_level / 100.0 if self.zoom_level else 1.0
+                if scale_factor == 0:
+                    scale_factor = 1.0
+                image_x = int(event.pos().x() / scale_factor)
+                image_y = int(event.pos().y() / scale_factor)
+                self.mouse_moved.emit(QPoint(image_x, image_y))
+                return False  # propagar
+            if event.type() == QEvent.Type.MouseButtonPress:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self.image_clicked.emit(event.pos(), "left")
+                    return True
+                if event.button() == Qt.MouseButton.RightButton:
+                    self.image_clicked.emit(event.pos(), "right")
+                    return True
+        return super().eventFilter(watched, event)
 
     # ===================================================================
     # wheelEvent — zoom con Ctrl+rueda
