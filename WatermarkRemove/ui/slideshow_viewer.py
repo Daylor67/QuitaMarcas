@@ -26,6 +26,7 @@ from natsort import natsorted
 from WatermarkRemove import align_watermark, remove_watermark
 from WatermarkRemove.wm_remove import load_images_cv2, guardar, find_wm, quick_align_preview
 from WatermarkRemove.yolo.auto_detector import detect_watermarks, resolve_png_for_class
+from WatermarkRemove.ui.components import NavigationController, WatermarkProcessor, TrainingDataCollector
 
 class SlideshowViewer(QDialog):
     """
@@ -54,63 +55,59 @@ class SlideshowViewer(QDialog):
 
     def __init__(self, folder_path: str, parent=None, watermark_tab=None):
         super().__init__(parent)
-        self.folder_path = Path(folder_path) if folder_path else None
-        self.image_files = []
-        self.current_index = 0
+        # === Estado del composer (NO migra al NavigationController) ===
         self.user_approved = False
-        self.current_pixmap = None  # Pixmap original sin zoom
-        self.zoom_level = 100  # Nivel de zoom actual
-        self.controls_panel_width = 280  # Ancho del panel de controles para cálculos
-
         # Referencia al watermark_tab para logging
         self.watermark_tab = watermark_tab
+        self.controls_panel_width = 280  # Ancho del panel de controles (para layout)
 
-        # Información de marca de agua (se setean al elegir carpeta en el combo)
+        # NOTA Plan 02-01: la navegacion (image_files, current_index, working_image,
+        # output_folder, processed_images, processed_positions, current_pixmap,
+        # zoom_level) vive ahora en self.navigation (NavigationController).
+        # Los stubs `self.processor` y `self.collector` son placeholders inactivos
+        # para Plans 02 y 03 — no estan wired en este plan.
+
+        # === Estado de watermark (todavia inline, migra a WatermarkProcessor en Plan 02) ===
         self.watermark_folder = None
         self.watermark_name = None
         self.watermark_positions = {}  # Posiciones cargadas desde JSON
         self.watermark_files = []      # Archivos PNG visibles en el combo (subset filtrado)
         self.watermark_files_all = []  # Lista completa sin filtro
+        self.watermark_rectangles = {}  # pos_name -> rect dict (para detección de clicks)
 
-        # Procesamiento de marcas de agua
-        self.output_folder = None  # Carpeta donde se guardarán las imágenes procesadas
-        self.processed_images = set()  # Set de índices de imágenes ya procesadas
-        self.processed_positions = {}  # Diccionario: {image_index: set(pos_names)} - posiciones procesadas por imagen
-        self.watermark_rectangles = {}  # Diccionario: pos_name -> QRect (para detección de clicks)
-
-        # Modo recorte
+        # Modo recorte (migra a WatermarkProcessor en Plan 02 Task 1)
         self.crop_mode_enabled = False
 
-        # Modo detección automática YOLO
+        # Modo detección automática YOLO (migra en Plan 02)
         self.auto_mode_enabled = False
-        self.detected_marks: list = []        # lista de dicts (ver _run_auto_detection)
+        self.detected_marks: list = []
         self.selected_mark_index = -1
         self.auto_preview_image: Optional[np.ndarray] = None
 
-        # Modo selección manual
-        self.manual_mode_enabled = False  # Si está activado el modo manual
-        self.manual_overlay_label = None  # Label flotante para el overlay
-        self.mouse_position = None  # Posición actual del cursor (QPoint)
-        self.preview_image = None  # Imagen con marca removida (temporal, numpy array)
-        self.is_preview_active = False  # Si hay un preview activo esperando confirmación
+        # Modo selección manual (migra en Plan 02)
+        self.manual_mode_enabled = False
+        self.mouse_position = None
+        self.preview_image = None
+        self.is_preview_active = False
 
-        # Sistema de eventos atómicos para remoción de marcas
-        self.current_event_position: Optional[Tuple[int, int]] = None  # Coordenadas del click del evento actual (best_x, best_y)
-        self.current_event_watermark_index: Optional[int] = None  # Índice de la marca de agua usada en el evento actual
-        self.current_event_watermark: Optional[np.ndarray] = None  # Marca cacheada (BGRA) para sub-eventos del evento actual
-        self.base_image_for_preview: Optional[np.ndarray] = None  # Imagen base para el sub-evento actual
+        # Sistema de eventos atómicos (migra en Plan 02)
+        self.current_event_position: Optional[Tuple[int, int]] = None
+        self.current_event_watermark_index: Optional[int] = None
+        self.current_event_watermark: Optional[np.ndarray] = None
+        # base_image_for_preview queda en SlideshowViewer (manual mode state) — Plan 02 lo migra
+        self.base_image_for_preview: Optional[np.ndarray] = None
 
-        # Imagen de trabajo en memoria (fuente de verdad para edición)
-        self.working_image: Optional[np.ndarray] = None
+        # Alpha por marca de agua (migra en Plan 02)
+        self.watermark_alpha_values: dict = {}
 
-        # Alpha por marca de agua (índice -> valor alpha)
-        self.watermark_alpha_values: dict = {}  # {0: 1.0, 1: 1.5, ...}
+        # === Componente de navegacion (Plan 02-01) ===
+        self.navigation = NavigationController(folder_path, parent=self, watermark_tab=watermark_tab)
+
+        # === Stubs de los otros 2 componentes (placeholders Plan 02/03) ===
+        self.processor = WatermarkProcessor(parent=self, watermark_tab=watermark_tab)
+        self.collector = TrainingDataCollector(parent=self, watermark_tab=watermark_tab)
 
         self._setup_ui()
-        self._load_image_list()
-
-        if self.image_files:
-            self._show_current_image()
 
     def _update_counts_label(self):
         """Lee training_data.json y actualiza el conteo de muestras por clase."""
@@ -163,9 +160,22 @@ class SlideshowViewer(QDialog):
         left_panel = self._create_controls_panel()
         main_layout.addWidget(left_panel)
 
-        # === PANEL DERECHO: Imagen con zoom ===
-        right_panel = self._create_image_panel()
-        main_layout.addWidget(right_panel, 1)  # stretch=1 para que use todo el espacio
+        # === PANEL DERECHO: NavigationController (panel completo: contador+filename+prev/next+image+zoom) ===
+        main_layout.addWidget(self.navigation, 1)  # stretch=1 — el navigation panel ocupa todo el espacio
+
+        # === Wiring de senales del NavigationController ===
+        # window_resize_requested: el composer (QDialog) ejecuta resize cuando navigation pide
+        self.navigation.window_resize_requested.connect(self._on_navigation_resize_requested)
+        # finish_requested: cuando navigation llega al final, mostrar dialogo de fin
+        self.navigation.finish_requested.connect(self._finish_review)
+
+        # === Instalar event filter del composer sobre navigation.image_label (manual mode inline) ===
+        self._install_manual_mode_eventfilter()
+
+    def _on_navigation_resize_requested(self, width: int, height: int):
+        """Slot: NavigationController solicita resize. Mantiene altura actual y ajusta ancho."""
+        # El alto se mantiene fijo (basado en el tamaño del panel de controles)
+        self.resize(width, self.height())
 
     def _create_controls_panel(self) -> QWidget:
         """Crea el panel de controles (izquierda) con scroll vertical."""
@@ -191,27 +201,8 @@ class SlideshowViewer(QDialog):
         outer.setSpacing(0)
         outer.addWidget(scroll)
 
-        # Información de carpeta  ////////////////////////////////////////
-        info_group = QGroupBox("ℹ️ Info")
-        info_layout = QVBoxLayout(info_group)
-        info_layout.setSpacing(5)
-
-        # Contador de imágenes
-        info_layout.addWidget(QLabel("Imagen:"))
-        self.counter_label = QLabel("0 / 0")
-        self.counter_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        self.counter_label.setStyleSheet("font-size: 15px; font-weight: bold; color: #2196F3; padding: 5px;")
-        info_layout.addWidget(self.counter_label)
-
-        # Nombre del archivo actual
-        self.filename_label = QLabel("Sin archivo")
-        self.filename_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.filename_label.setStyleSheet("font-size: 12px; color: #888; padding: 10px; background-color: #1e1e1e; border-radius: 5px;")
-        self.filename_label.setWordWrap(True)
-        self.filename_label.setMaximumHeight(60)  # Limitar altura
-        info_layout.addWidget(self.filename_label)
-
-        layout.addWidget(info_group)
+        # NOTA Plan 02-01: el bloque "Info" (contador + filename) migro a NavigationController._setup_ui.
+        # Si se necesita acceso, usar self.navigation.counter_label / self.navigation.filename_label.
 
         # Toggle global: detección automática vs selección manual ////////////////////////////
         self.auto_mode_checkbox = QCheckBox("🤖 Modo detección automática")
@@ -266,7 +257,7 @@ class SlideshowViewer(QDialog):
         seleccion_layout.addWidget(self.crop_pixels_input)
 
         self.crop_invert_checkbox = QCheckBox("De abajo hacia arriba")
-        self.crop_invert_checkbox.stateChanged.connect(lambda _: self._apply_zoom())
+        self.crop_invert_checkbox.stateChanged.connect(lambda _: self.navigation._apply_zoom())
         self.crop_invert_checkbox.hide()
         seleccion_layout.addWidget(self.crop_invert_checkbox)
 
@@ -434,7 +425,7 @@ class SlideshowViewer(QDialog):
             "padding: 8px; font-size: 11px; background-color: #4c7faf; color: white; font-weight: bold;"
         )
         self.auto_accept_next_btn.clicked.connect(self._accept_auto_detections)
-        self.auto_accept_next_btn.clicked.connect(self._next_image)
+        self.auto_accept_next_btn.clicked.connect(self.navigation.request_next)
         auto_btns.addWidget(self.auto_accept_next_btn)
         
         auto_layout.addLayout(file1)
@@ -443,36 +434,24 @@ class SlideshowViewer(QDialog):
         self.auto_group.hide()
         layout.addWidget(self.auto_group)
 
-        # Botones de navegación y acción en cuadrícula 2x2 ////////////////////////////////////////
+        # Botones de acción (prev/next migraron a NavigationController) ////////////////
+        # NOTA Plan 02-01: los botones prev_btn / next_btn ahora viven en self.navigation.
+        # Solo finish_btn y cancel_btn (acciones del dialogo) quedan en el composer.
         nav_group = QGroupBox("✳️ Navegación")
-        grid_layout = QGridLayout(nav_group)
-        grid_layout.setSpacing(5)  # Reducir espacio entre botones
+        nav_action_layout = QHBoxLayout(nav_group)
+        nav_action_layout.setSpacing(5)
 
-        # Fila 1: Navegación
-        self.prev_btn = QPushButton("Anterior")
-        self.prev_btn.clicked.connect(self._previous_image)
-        self.prev_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #555; color: white;")
-        self.prev_btn.setMaximumHeight(40)  # Altura fija
-        grid_layout.addWidget(self.prev_btn, 0, 0)  # Fila 0, Columna 0
-
-        self.next_btn = QPushButton("Siguiente")
-        self.next_btn.clicked.connect(self._next_image)
-        self.next_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #4CAF50; color: white; font-weight: bold;")
-        self.next_btn.setMaximumHeight(40)  # Altura fija
-        grid_layout.addWidget(self.next_btn, 0, 1)  # Fila 0, Columna 1
-
-        # Fila 2: Acción
         self.finish_btn = QPushButton("Finalizar y Procesar")
         self.finish_btn.clicked.connect(self._finish_review)
         self.finish_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #2196F3; color: white; font-weight: bold;")
-        self.finish_btn.setMaximumHeight(40)  # Altura fija
-        grid_layout.addWidget(self.finish_btn, 1, 0)  # Fila 1, Columna 0
+        self.finish_btn.setMaximumHeight(40)
+        nav_action_layout.addWidget(self.finish_btn)
 
         self.cancel_btn = QPushButton("Cancelar")
         self.cancel_btn.clicked.connect(self._cancel_review)
         self.cancel_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #f44336; color: white;")
-        self.cancel_btn.setMaximumHeight(40)  # Altura fija
-        grid_layout.addWidget(self.cancel_btn, 1, 1)  # Fila 1, Columna 1
+        self.cancel_btn.setMaximumHeight(40)
+        nav_action_layout.addWidget(self.cancel_btn)
 
         layout.addWidget(nav_group)
 
@@ -496,88 +475,16 @@ class SlideshowViewer(QDialog):
 
         return panel
 
-    def _create_image_panel(self) -> QWidget:
-        """Crea el panel de imagen con zoom (derecha)"""
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setSpacing(0)
-        layout.setContentsMargins(0, 0, 0, 0)
+    # _create_image_panel removido en Plan 02-01: el NavigationController construye
+    # su propio panel derecho (image_label + scroll_area + zoom overlay + manual overlay).
+    # _create_output_folder y _load_image_list migrados a NavigationController (Plan 02-01 Task 2).
+    # Para acceso desde el composer (manual mode todavia inline): usar
+    #   self.navigation._create_output_folder() / self.navigation.image_files / etc.
+    # IMPORTANTE: instalar el event filter del manual mode sobre el image_label del navigation.
 
-        # Área de scroll con imagen
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(False)  # Importante para que funcione el zoom
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setStyleSheet("border: 2px solid #444; background-color: #2b2b2b;")
-
-        self.image_label = QLabel()
-        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_label.setStyleSheet("background-color: #2b2b2b;")
-        scroll.setWidget(self.image_label)
-
-        # Label flotante de zoom (encima de la imagen)
-        self.zoom_overlay_label = QLabel(scroll)
-        self.zoom_overlay_label.setStyleSheet(
-            "background-color: rgba(0, 0, 0, 180); "
-            "color: white; "
-            "padding: 8px 16px; "
-            "border-radius: 5px; "
-            "font-size: 16px; "
-            "font-weight: bold;"
-        )
-        self.zoom_overlay_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.zoom_overlay_label.hide()  # Oculto por defecto
-
-        # Timer para ocultar el label de zoom
-        self.zoom_hide_timer = QTimer(self)
-        self.zoom_hide_timer.timeout.connect(self._hide_zoom_overlay)
-        self.zoom_hide_timer.setSingleShot(True)
-
-        # Label flotante para overlay de selección manual
-        self.manual_overlay_label = QLabel(scroll)
-        self.manual_overlay_label.setStyleSheet(
-            "background-color: rgba(33, 150, 243, 50); "
-            "border: 3px solid rgba(33, 150, 243, 200); "
-        )
-        self.manual_overlay_label.hide()
-        self.manual_overlay_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-
-        layout.addWidget(scroll, 1)
-
-        self.scroll_area = scroll  # Guardar referencia para uso posterior
-
-        # Instalar event filter en image_label para capturar eventos de mouse
-        self.image_label.installEventFilter(self)
-
-        return panel
-
-    def _create_output_folder(self):
-        """Crea la carpeta de salida para las imágenes procesadas"""
-        if not self.folder_path:
-            return
-
-        # Nombre de la carpeta: "{nombre_original} [sin marca]"
-        folder_name = self.folder_path.name + " [sin marca]"
-        self.output_folder = self.folder_path.parent / folder_name
-
-        # Crear la carpeta si no existe
-        self.output_folder.mkdir(exist_ok=True)
-
-    def _load_image_list(self):
-        """Carga la lista de archivos de imagen"""
-        if not self.folder_path or not self.folder_path.exists():
-            return
-
-        # Si es un archivo, usar su directorio padre
-        if self.folder_path.is_file():
-            self.folder_path = self.folder_path.parent
-
-        # Buscar todas las imágenes y ordenarlas
-        for file in natsorted(self.folder_path.iterdir()):
-            if file.is_file() and file.suffix.lower() in self.SUPPORTED_FORMATS:
-                self.image_files.append(file)
-
-        self._update_counter()
+    def _install_manual_mode_eventfilter(self):
+        """Instala el event filter del composer en navigation.image_label (manual mode todavia inline)."""
+        self.navigation.image_label.installEventFilter(self)
 
     def _load_watermark_folders(self):
         """Carga las carpetas disponibles en WatermarkRemove/marcas"""
@@ -631,11 +538,11 @@ class SlideshowViewer(QDialog):
             wm_persistence.set_last_watermark_folder(folder_name)
 
             # Crear carpeta de salida si aún no existe
-            if not self.output_folder and self.folder_path:
-                self._create_output_folder()
+            if not self.navigation.output_folder and self.navigation.folder_path:
+                self.navigation._create_output_folder()
 
             # Actualizar la visualización
-            self._show_current_image()
+            self.navigation._show_current_image()
 
     def _load_watermarks_into_combo(self):
         """Carga las marcas de agua PNG en el ComboBox desde la carpeta seleccionada"""
@@ -673,7 +580,7 @@ class SlideshowViewer(QDialog):
             self._on_watermark_changed(0)
         else:
             self.watermark_positions = {}
-            self._show_current_image()
+            self.navigation._show_current_image()
 
     def _on_watermark_changed(self, index):
         """Callback cuando cambia la marca individual seleccionada"""
@@ -689,7 +596,7 @@ class SlideshowViewer(QDialog):
             self._load_watermark_positions()
 
             # Actualizar la visualización con los nuevos cuadrados
-            self._show_current_image()
+            self.navigation._show_current_image()
 
     def _load_watermark_positions(self):
         """Carga posiciones para la PNG actual; cae a folder-level si no existe."""
@@ -723,124 +630,11 @@ class SlideshowViewer(QDialog):
         except Exception as e:
             self._log(f"⚠️ Error cargando posiciones de marca de agua: {e}")
 
-    def _show_current_image(self):
-        """Muestra la imagen actual con el zoom aplicado"""
-        if not self.image_files or self.current_index >= len(self.image_files):
-            return
-
-        current_file = self.image_files[self.current_index]
-
-        # Cargar working_image SOLO si no existe (primera vez en esta imagen)
-        if self.working_image is None:
-            self.working_image = load_images_cv2(current_file)
-
-        # Convertir working_image a QPixmap para mostrar
-        if self.working_image is not None:
-            height, width = self.working_image.shape[:2]
-            bytes_per_line = 3 * width
-            q_image = QImage(self.working_image.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
-            q_image = q_image.rgbSwapped()  # OpenCV usa BGR, Qt usa RGB
-            self.current_pixmap = QPixmap.fromImage(q_image)
-        else:
-            # Fallback a cargar desde disco si working_image falla
-            self.current_pixmap = QPixmap(str(current_file))
-
-        if not self.current_pixmap.isNull():
-            # Aplicar zoom
-            self._apply_zoom()
-
-            # Ajustar el tamaño de la ventana según la imagen
-            width = self.current_pixmap.width()
-            height = self.current_pixmap.height()
-            self._adjust_window_size(width, height)
-        else:
-            self.image_label.setText("Error cargando imagen")
-
-        # Actualizar nombre de archivo
-        self.filename_label.setText(f"{current_file.name}")
-
-        # Actualizar contador
-        self._update_counter()
-
-        # Actualizar estado de botones
-        self.prev_btn.setEnabled(self.current_index > 0)
-        self.next_btn.setEnabled(self.current_index < len(self.image_files) - 1)
-
-        # Si estamos en modo auto, redetectar para la nueva imagen
-        if self.auto_mode_enabled:
-            self._run_auto_detection()
-
-    def _apply_zoom(self):
-        """Aplica el nivel de zoom actual a la imagen y dibuja overlays de marcas"""
-        # Prioridad: preview_image (sub-evento manual) > auto_preview_image (modo auto) > working_image
-        if self.is_preview_active and self.preview_image is not None:
-            # Mostrar preview del sub-evento
-            height, width = self.preview_image.shape[:2]
-            bytes_per_line = 3 * width
-            q_image = QImage(self.preview_image.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
-            q_image = q_image.rgbSwapped()  # OpenCV usa BGR, Qt usa RGB
-            pixmap_to_scale = QPixmap.fromImage(q_image)
-        elif self.auto_mode_enabled and self.auto_preview_image is not None:
-            # Mostrar preview de detección automática
-            height, width = self.auto_preview_image.shape[:2]
-            bytes_per_line = 3 * width
-            q_image = QImage(self.auto_preview_image.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
-            q_image = q_image.rgbSwapped()
-            pixmap_to_scale = QPixmap.fromImage(q_image)
-        elif self.working_image is not None:
-            # Mostrar imagen de trabajo (con sub-eventos previos aplicados)
-            height, width = self.working_image.shape[:2]
-            bytes_per_line = 3 * width
-            q_image = QImage(self.working_image.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
-            q_image = q_image.rgbSwapped()  # OpenCV usa BGR, Qt usa RGB
-            pixmap_to_scale = QPixmap.fromImage(q_image)
-        else:
-            # Fallback a pixmap original
-            if self.current_pixmap is None or self.current_pixmap.isNull():
-                return
-            pixmap_to_scale = self.current_pixmap
-
-        # Calcular nuevo tamaño basado en zoom
-        scale_factor = self.zoom_level / 100.0
-        new_size = pixmap_to_scale.size() * scale_factor
-
-        # Escalar imagen
-        scaled_pixmap = pixmap_to_scale.scaled(
-            new_size,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
-        )
-
-        # Overlays: marcas de agua (desactivado en modo recorte, manual o auto) o recorte
-        if (self.watermark_positions and self.watermark_files
-                and not self.manual_mode_enabled and not self.crop_mode_enabled
-                and not self.auto_mode_enabled):
-            scaled_pixmap = self._draw_watermark_overlays(scaled_pixmap, scale_factor)
-
-        if self.crop_mode_enabled:
-            scaled_pixmap = self._draw_crop_overlay(scaled_pixmap, scale_factor)
-
-        # Highlight de la marca seleccionada en modo auto
-        if (self.auto_mode_enabled
-                and 0 <= self.selected_mark_index < len(self.detected_marks)):
-            mark = self.detected_marks[self.selected_mark_index]
-            if mark['watermark_array'] is not None:
-                h_wm, w_wm = mark['watermark_array'].shape[:2]
-                sx = int(mark['x'] * scale_factor)
-                sy = int(mark['y'] * scale_factor)
-                sw = int(w_wm * scale_factor)
-                sh = int(h_wm * scale_factor)
-                painter = QPainter(scaled_pixmap)
-                pen = QPen(QColor(255, 235, 59, 230))  # amarillo
-                pen.setWidth(4)
-                painter.setPen(pen)
-                painter.setBrush(QColor(255, 235, 59, 40))
-                painter.drawRect(sx, sy, sw, sh)
-                painter.end()
-
-        self.image_label.setPixmap(scaled_pixmap)
-        # Ajustar el tamaño del label para que funcione el scroll
-        self.image_label.resize(scaled_pixmap.size())
+    # _show_current_image y _apply_zoom migrados a NavigationController (Plan 02-01 Task 2).
+    # REGRESION TEMPORAL: cuadros rojo/verde de posiciones y overlay de crop pintaran
+    # de vuelta en Plan 02-02 cuando WatermarkProcessor decorate el pixmap via signal/slot.
+    # Para forzar repintado desde el composer (manual mode inline): self.navigation._apply_zoom()
+    # Para refrescar imagen al cambiar de marca: self.navigation._show_current_image()
 
     def _toggle_crop_mode(self, state):
         """Activa o desactiva el modo de recorte."""
@@ -858,13 +652,13 @@ class SlideshowViewer(QDialog):
             self.crop_invert_checkbox.hide()
             self.crop_apply_btn.hide()
 
-        self._apply_zoom()
+        self.navigation._apply_zoom()
 
     def _on_crop_pixels_changed(self, value):
         """Actualiza el overlay y persiste el valor en settings."""
         wm_persistence.set_last_crop_pixels(value)
         if self.crop_mode_enabled:
-            self._apply_zoom()
+            self.navigation._apply_zoom()
 
     def _draw_crop_overlay(self, pixmap: QPixmap, scale_factor: float) -> QPixmap:
         """Dibuja un overlay semi-transparente mostrando la zona a recortar."""
@@ -899,7 +693,7 @@ class SlideshowViewer(QDialog):
 
     def _apply_crop(self):
         """Recorta working_image y guarda el resultado."""
-        if not self.image_files or self.working_image is None:
+        if not self.navigation.image_files or self.navigation.working_image is None:
             return
         try:
             pixels = self.crop_pixels_input.value()
@@ -907,25 +701,25 @@ class SlideshowViewer(QDialog):
                 self._log("⚠️ Ingresá la cantidad de píxeles a recortar")
                 return
 
-            h = self.working_image.shape[0]
+            h = self.navigation.working_image.shape[0]
             if pixels >= h:
                 self._log("❌ El recorte supera la altura de la imagen")
                 return
 
             if self.crop_invert_checkbox.isChecked():
-                self.working_image = self.working_image[:h - pixels]
+                self.navigation.working_image = self.navigation.working_image[:h - pixels]
                 direccion = "abajo"
             else:
-                self.working_image = self.working_image[pixels:]
+                self.navigation.working_image = self.navigation.working_image[pixels:]
                 direccion = "arriba"
 
-            current_file = self.image_files[self.current_index]
-            if not self.output_folder:
-                self._create_output_folder()
-            guardar(current_file, self.working_image, self.output_folder)
-            self.processed_images.add(self.current_index)
+            current_file = self.navigation.image_files[self.navigation.current_index]
+            if not self.navigation.output_folder:
+                self.navigation._create_output_folder()
+            guardar(current_file, self.navigation.working_image, self.navigation.output_folder)
+            self.navigation.processed_images.add(self.navigation.current_index)
 
-            self._show_current_image()
+            self.navigation._show_current_image()
             self._log(f"✂️ Recortados {pixels}px desde {direccion} → {current_file.name}")
 
         except Exception as e:
@@ -950,7 +744,7 @@ class SlideshowViewer(QDialog):
         self.watermark_rectangles = {}
 
         # Obtener posiciones ya procesadas para esta imagen
-        processed_positions_set = self.processed_positions.get(self.current_index, set())
+        processed_positions_set = self.navigation.processed_positions.get(self.navigation.current_index, set())
 
         try:
             # Obtener el índice de la marca actual en el combo
@@ -972,8 +766,8 @@ class SlideshowViewer(QDialog):
             wm_height, wm_width = watermark_cv.shape[:2]
 
             # Obtener dimensiones de la imagen original
-            img_width = self.current_pixmap.width()
-            img_height = self.current_pixmap.height()
+            img_width = self.navigation.current_pixmap.width()
+            img_height = self.navigation.current_pixmap.height()
 
             # Dibujar un cuadrado para cada posición guardada
             for pos_name, pos_data in self.watermark_positions.items():
@@ -1048,132 +842,13 @@ class SlideshowViewer(QDialog):
 
         return result_pixmap
 
-    def _set_zoom(self, new_zoom: int):
-        """Establece el nivel de zoom y actualiza la visualización"""
-        # Limitar el zoom entre 10% y 200%
-        self.zoom_level = max(10, min(200, new_zoom))
-        self._apply_zoom()
-        self._show_zoom_overlay()
-
-    def _show_zoom_overlay(self):
-        """Muestra el label flotante con el zoom actual"""
-        self.zoom_overlay_label.setText(f"🔍 {self.zoom_level}%")
-
-        # Posicionar el label en la esquina superior derecha del scroll area
-        scroll_width = self.scroll_area.width()
-        label_width = 120
-        label_height = 40
-        x = scroll_width - label_width - 20
-        y = 20
-
-        self.zoom_overlay_label.setGeometry(x, y, label_width, label_height)
-        self.zoom_overlay_label.show()
-        self.zoom_overlay_label.raise_()  # Traer al frente
-
-        # Reiniciar el timer para ocultar después de 2 segundos
-        self.zoom_hide_timer.start(2000)
-
-    def _hide_zoom_overlay(self):
-        """Oculta el label flotante de zoom"""
-        self.zoom_overlay_label.hide()
-
-    def _adjust_window_size(self, image_width: int, image_height: int):
-        """
-        Ajusta el tamaño de la ventana según la imagen actual.
-        - Ancho: Se ajusta al ancho de la imagen
-        - Alto: Fijo basado en el panel de controles
-        """
-        # Calcular el ancho total de la ventana
-        # Panel de controles + spacing + imagen + bordes/padding
-        SPACING = 15  # spacing del main_layout
-        MARGINS = 20  # 10px a cada lado (contentsMargins)
-        SCROLL_BORDER = 4  # Border del scroll area (2px * 2)
-        EXTRA_PADDING = 20  # Padding extra para barras de scroll y espacios
-
-        new_window_width = (
-            self.controls_panel_width +  # Panel de controles fijo
-            SPACING +                     # Espacio entre paneles
-            image_width +                 # Ancho de la imagen
-            SCROLL_BORDER +               # Borde del scroll area
-            MARGINS +                     # Márgenes laterales
-            EXTRA_PADDING                 # Padding extra
-        )
-
-        # El alto se mantiene fijo (basado en el tamaño del panel de controles)
-        # No se usa image_height porque solo queremos ajustar el ancho
-        current_height = self.height()
-
-        # Redimensionar solo el ancho, manteniendo el alto fijo
-        self.resize(new_window_width, current_height)
-
-    def _update_counter(self):
-        """Actualiza el contador de imágenes"""
-        if self.image_files:
-            self.counter_label.setText(
-                f"{self.current_index + 1} / {len(self.image_files)}"
-            )
-        else:
-            self.counter_label.setText("0 / 0")
-
-    def _clear_image_memory(self):
-        """Limpia la imagen de memoria cuando se navega a otra imagen"""
-        self.working_image = None  # Limpiar imagen de trabajo
-        self.base_image_for_preview = None
-        self.current_event_position = None
-        self.current_event_watermark_index = None
-        self.current_event_watermark = None
-        self.preview_image = None
-        self.is_preview_active = False
-
-    def _next_image(self):
-        """Avanza a la siguiente imagen, guardando la actual si no fue procesada"""
-        # Limpiar memoria de eventos de la imagen actual
-        self._clear_image_memory()
-
-        # Guardar la imagen actual si no ha sido procesada (sin marcas removidas)
-        if self.current_index not in self.processed_images:
-            self._save_current_image_as_is()
-
-        if self.current_index < len(self.image_files) - 1:
-            self.current_index += 1
-            self._show_current_image()
-        else:
-            # Si ya estamos en la última imagen, finalizar automáticamente
-            self._finish_review()
-
-    def _previous_image(self):
-        """Retrocede a la imagen anterior"""
-        # Limpiar memoria de eventos de la imagen actual
-        self._clear_image_memory()
-
-        if self.current_index > 0:
-            self.current_index -= 1
-            self._show_current_image()
-
-    def _save_current_image_as_is(self):
-        """Guarda la imagen actual sin modificaciones (cuando no se removió ninguna marca)"""
-        if not self.output_folder or not self.image_files:
-            return
-
-        try:
-            current_file = self.image_files[self.current_index]
-
-            # Cargar imagen original con OpenCV
-            image = load_images_cv2(current_file)
-            if image is None:
-                self._log(f"⚠️ Error cargando imagen: {current_file.name}")
-                return
-
-            # Guardar la imagen sin modificaciones
-            guardar(current_file, image, self.output_folder)
-
-            # Marcar como procesada
-            self.processed_images.add(self.current_index)
-
-            self._log(f"💾 Imagen guardada sin cambios: {current_file.name}")
-
-        except Exception as e:
-            self._log(f"❌ Error guardando imagen: {e}")
+    # _set_zoom, _show_zoom_overlay, _hide_zoom_overlay, _adjust_window_size,
+    # _update_counter, _clear_image_memory, _next_image, _previous_image,
+    # _save_current_image_as_is migrados a NavigationController (Plan 02-01 Task 2).
+    # Acceso desde el composer:
+    #   - zoom: self.navigation.set_zoom_level(n) / self.navigation.adjust_zoom(delta)
+    #   - navegacion: self.navigation.request_next() / self.navigation.request_previous()
+    #   - resize de ventana: emitido via signal window_resize_requested (ya conectado)
 
     def _process_watermark_at_position(self, pos_name: str, rect_data: dict, is_cumulative: bool = False):
         """
@@ -1185,12 +860,12 @@ class SlideshowViewer(QDialog):
             is_cumulative: Si es True (click derecho), aplica acumulativamente.
                           Si es False (click izquierdo), reemplaza cualquier procesamiento anterior.
         """
-        if not self.output_folder or not self.image_files:
+        if not self.navigation.output_folder or not self.navigation.image_files:
             return
 
         try:
             # Obtener el archivo de imagen actual
-            current_file = self.image_files[self.current_index]
+            current_file = self.navigation.image_files[self.navigation.current_index]
 
             # Obtener el índice de la marca actual
             current_watermark_index = self.watermark_combo.currentIndex()
@@ -1198,7 +873,7 @@ class SlideshowViewer(QDialog):
                 return
 
             # Cargar la imagen con OpenCV (soporte Unicode)
-            output_path = self.output_folder / current_file.name
+            output_path = self.navigation.output_folder / current_file.name
 
             if is_cumulative and output_path.exists():
                 # Click derecho: cargar imagen ya procesada para aplicar más marcas
@@ -1207,8 +882,8 @@ class SlideshowViewer(QDialog):
                 # Click izquierdo O primera vez: usar imagen original
                 image = load_images_cv2(current_file)
                 # Si es click izquierdo, limpiar posiciones procesadas anteriormente
-                if not is_cumulative and self.current_index in self.processed_positions:
-                    self.processed_positions[self.current_index].clear()
+                if not is_cumulative and self.navigation.current_index in self.navigation.processed_positions:
+                    self.navigation.processed_positions[self.navigation.current_index].clear()
 
             if image is None:
                 self._log(f"❌ Error cargando imagen: {current_file.name}")
@@ -1235,31 +910,31 @@ class SlideshowViewer(QDialog):
             result_image = remove_watermark(image, watermark, x, y, alpha_adjust=self.alpha_adjust.value())
 
             # Guardar la imagen procesada en la carpeta de salida (soporte Unicode)
-            guardar(current_file, result_image, self.output_folder)
+            guardar(current_file, result_image, self.navigation.output_folder)
 
             # Marcar esta imagen como procesada
-            self.processed_images.add(self.current_index)
+            self.navigation.processed_images.add(self.navigation.current_index)
 
             # Marcar esta posición específica como procesada para esta imagen
-            if self.current_index not in self.processed_positions:
-                self.processed_positions[self.current_index] = set()
-            self.processed_positions[self.current_index].add(pos_name)
+            if self.navigation.current_index not in self.navigation.processed_positions:
+                self.navigation.processed_positions[self.navigation.current_index] = set()
+            self.navigation.processed_positions[self.navigation.current_index].add(pos_name)
 
             # Actualizar la visualización para mostrar el cuadrado verde
-            self._show_current_image()
+            self.navigation._show_current_image()
 
             self._log(f"✅ Marca de agua removida: {pos_name} en {current_file.name}")
 
             # Solo avanzar automáticamente si es click izquierdo (no acumulativo)
             if not is_cumulative:
-                self._next_image()
+                self.navigation.request_next()
 
         except Exception as e:
             self._log(f"❌ Error procesando marca de agua: {e}")
 
     def eventFilter(self, watched, event):
         """Filtro de eventos para capturar mouse en image_label"""
-        if watched == self.image_label and self.manual_mode_enabled:
+        if watched == self.navigation.image_label and self.manual_mode_enabled:
             if event.type() == QEvent.Type.MouseMove:
                 # Actualizar overlay siguiendo el cursor
                 self._update_manual_overlay(event.pos())
@@ -1286,8 +961,8 @@ class SlideshowViewer(QDialog):
 
         if self.manual_mode_enabled:
             # Activar modo manual
-            self.image_label.setMouseTracking(True)
-            self.manual_overlay_label.show()
+            self.navigation.image_label.setMouseTracking(True)
+            self.navigation.manual_overlay_label.show()
             self.alpha_adjust.show()
             self.label_alpha_adj.show()
             self.label_offset_adj.show()
@@ -1297,8 +972,8 @@ class SlideshowViewer(QDialog):
             self._log("🔍 Modo selección manual activado")
         else:
             # Desactivar modo manual
-            self.image_label.setMouseTracking(False)
-            self.manual_overlay_label.hide()
+            self.navigation.image_label.setMouseTracking(False)
+            self.navigation.manual_overlay_label.hide()
             self.alpha_adjust.hide()
             self.label_alpha_adj.hide()
             self.label_offset_adj.hide()
@@ -1313,7 +988,7 @@ class SlideshowViewer(QDialog):
             self.is_preview_active = False
             self._log("✅ Modo selección manual desactivado")
             # Refrescar imagen
-            self._apply_zoom()
+            self.navigation._apply_zoom()
 
     def _update_manual_overlay(self, pos):
         """Actualiza la posición del overlay manual siguiendo el cursor"""
@@ -1332,20 +1007,20 @@ class SlideshowViewer(QDialog):
             wm_height, wm_width = watermark_cv.shape[:2]
 
             # Aplicar escala de zoom
-            scale_factor = self.zoom_level / 100.0
+            scale_factor = self.navigation.zoom_level / 100.0
             scaled_width = int(wm_width * scale_factor)
             scaled_height = int(wm_height * scale_factor)
 
             # Convertir posición a coordenadas del scroll area
-            scroll_pos = self.scroll_area.mapFromGlobal(self.image_label.mapToGlobal(pos))
+            scroll_pos = self.navigation.scroll_area.mapFromGlobal(self.navigation.image_label.mapToGlobal(pos))
 
             # Centrar overlay en cursor
             overlay_x = scroll_pos.x() - scaled_width // 2
             overlay_y = scroll_pos.y() - scaled_height // 2
 
             # Posicionar overlay
-            self.manual_overlay_label.setGeometry(overlay_x, overlay_y, scaled_width, scaled_height)
-            self.manual_overlay_label.raise_()
+            self.navigation.manual_overlay_label.setGeometry(overlay_x, overlay_y, scaled_width, scaled_height)
+            self.navigation.manual_overlay_label.raise_()
 
             # Guardar coordenadas originales de la imagen (sin escala de zoom)
             # pos es relativo al image_label escalado, dividir por scale_factor para obtener coordenadas reales
@@ -1377,7 +1052,7 @@ class SlideshowViewer(QDialog):
                 best_y + self.offset_y_adj.value(),
                 alpha=value,
             )
-            self._apply_zoom()
+            self.navigation._apply_zoom()
 
         except Exception as e:
             self._log(f"❌ Error recalculando preview: {e}")
@@ -1395,7 +1070,7 @@ class SlideshowViewer(QDialog):
                 best_y + self.offset_y_adj.value(),
                 alpha=self.alpha_adjust.value(),
             )
-            self._apply_zoom()
+            self.navigation._apply_zoom()
         except Exception as e:
             self._log(f"❌ Error recalculando preview (offset): {e}")
 
@@ -1423,7 +1098,7 @@ class SlideshowViewer(QDialog):
             self._log("⚠️ Ya hay un evento activo. Acepta o revierte primero.")
             return
 
-        if not self.mouse_position or not self.image_files:
+        if not self.mouse_position or not self.navigation.image_files:
             self._log("⚠️ Posicione el cursor sobre la marca de agua primero")
             return
 
@@ -1435,12 +1110,12 @@ class SlideshowViewer(QDialog):
                 return
 
             # Usar working_image como base (ya está en memoria)
-            if self.working_image is None:
+            if self.navigation.working_image is None:
                 self._log("❌ No hay imagen en memoria")
                 return
 
             # Guardar base para este sub-evento
-            self.base_image_for_preview = self.working_image
+            self.base_image_for_preview = self.navigation.working_image
 
             # Guardar índice de marca actual
             self.current_event_watermark_index = current_watermark_index
@@ -1489,8 +1164,8 @@ class SlideshowViewer(QDialog):
             self.is_preview_active = True
 
             # Bloquear UI
-            self.next_btn.setEnabled(False)
-            self.prev_btn.setEnabled(False)
+            self.navigation.next_btn.setEnabled(False)
+            self.navigation.prev_btn.setEnabled(False)
             self.watermark_combo.setEnabled(False)
 
             # Mostrar botones
@@ -1499,7 +1174,7 @@ class SlideshowViewer(QDialog):
             self.revert_btn.show()
 
             # Actualizar display
-            self._apply_zoom()
+            self.navigation._apply_zoom()
 
             self._log(f"✅ Evento iniciado en ({best_x}, {best_y}) - Ajusta alpha si necesitas")
 
@@ -1514,13 +1189,13 @@ class SlideshowViewer(QDialog):
             return
 
         try:
-            current_file = self.image_files[self.current_index]
-            if not self.output_folder:
-                self._create_output_folder()
+            current_file = self.navigation.image_files[self.navigation.current_index]
+            if not self.navigation.output_folder:
+                self.navigation._create_output_folder()
 
             # Pasada final con filtro JPEG (los previews en vivo lo saltean por velocidad)
             best_x, best_y = self.current_event_position
-            self.working_image = remove_watermark(
+            self.navigation.working_image = remove_watermark(
                 self.base_image_for_preview,
                 self.current_event_watermark,
                 best_x + self.offset_x_adj.value(),
@@ -1530,10 +1205,10 @@ class SlideshowViewer(QDialog):
             )
 
             # Guardar a disco
-            guardar(current_file, self.working_image, self.output_folder)
+            guardar(current_file, self.navigation.working_image, self.navigation.output_folder)
 
             # Marcar como procesada
-            self.processed_images.add(self.current_index)
+            self.navigation.processed_images.add(self.navigation.current_index)
 
             # Recopilar dato de entrenamiento YOLO (no debe interrumpir la remoción si falla)
             try:
@@ -1562,8 +1237,8 @@ class SlideshowViewer(QDialog):
             self.is_preview_active = False
 
             # Restaurar controles UI
-            self.next_btn.setEnabled(True)
-            self.prev_btn.setEnabled(True)
+            self.navigation.next_btn.setEnabled(True)
+            self.navigation.prev_btn.setEnabled(True)
             self.watermark_combo.setEnabled(True)  # Desbloquear combo
 
             # Restaurar botones
@@ -1572,7 +1247,7 @@ class SlideshowViewer(QDialog):
             self.reset_btn.show()
 
             # Refrescar display: ahora se muestra working_image (con filtro JPEG aplicado)
-            self._apply_zoom()
+            self.navigation._apply_zoom()
 
             # Actualizar conteo de datos de entrenamiento
             self._update_counts_label()
@@ -1602,8 +1277,8 @@ class SlideshowViewer(QDialog):
         self.is_preview_active = False
 
         # Restaurar controles UI
-        self.next_btn.setEnabled(True)
-        self.prev_btn.setEnabled(True)
+        self.navigation.next_btn.setEnabled(True)
+        self.navigation.prev_btn.setEnabled(True)
         self.watermark_combo.setEnabled(True)  # Desbloquear combo
 
         # Restaurar botones
@@ -1612,7 +1287,7 @@ class SlideshowViewer(QDialog):
         self.reset_btn.show()
 
         # Mostrar working_image (con sub-eventos previos aplicados)
-        self._apply_zoom()
+        self.navigation._apply_zoom()
 
         # Log
         self._log(f"↩️ Evento descartado")
@@ -1626,10 +1301,10 @@ class SlideshowViewer(QDialog):
         - Elimina entries del training_data.json para esta imagen
         - Recarga working_image desde el original y refresca display
         """
-        if not self.image_files:
+        if not self.navigation.image_files:
             return
 
-        current_file = self.image_files[self.current_index]
+        current_file = self.navigation.image_files[self.navigation.current_index]
 
         reply = QMessageBox.question(
             self,
@@ -1646,8 +1321,8 @@ class SlideshowViewer(QDialog):
             self._revert_preview()
 
         # Borrar el archivo procesado
-        if self.output_folder:
-            output_file = self.output_folder / current_file.name
+        if self.navigation.output_folder:
+            output_file = self.navigation.output_folder / current_file.name
             if output_file.exists():
                 try:
                     output_file.unlink()
@@ -1655,16 +1330,16 @@ class SlideshowViewer(QDialog):
                     self._log(f"⚠️ No se pudo borrar {output_file.name}: {e}")
 
         # Quitar marcadores de procesamiento
-        self.processed_images.discard(self.current_index)
-        self.processed_positions.pop(self.current_index, None)
+        self.navigation.processed_images.discard(self.navigation.current_index)
+        self.navigation.processed_positions.pop(self.navigation.current_index, None)
 
         # Limpiar entradas de training_data.json para esta imagen
         from WatermarkRemove.yolo.training_collector import remove_training_sample
         remove_training_sample(current_dir, current_file, self._log)
         
         # Recargar imagen original
-        self.working_image = load_images_cv2(current_file)
-        self._show_current_image()
+        self.navigation.working_image = load_images_cv2(current_file)
+        self.navigation._show_current_image()
         self._update_counts_label()
 
         self._log(f"↺ Imagen reseteada: {current_file.name}")
@@ -1686,15 +1361,15 @@ class SlideshowViewer(QDialog):
             self.selected_mark_index = -1
             self.auto_preview_image = None
             self.detections_list.clear()
-            self._apply_zoom()
+            self.navigation._apply_zoom()
 
     def _run_auto_detection(self):
         # TODO: Ventana emergente de "cargando modelo"
         """Corre YOLO sobre la imagen actual y arma la lista de detecciones."""
-        if self.working_image is None:
+        if self.navigation.working_image is None:
             return
         try:
-            detections = detect_watermarks(self.working_image)
+            detections = detect_watermarks(self.navigation.working_image)
         except FileNotFoundError as e:
             self._log(f"❌ {e}")
             QMessageBox.warning(self, "Modelo no encontrado", str(e))
@@ -1703,7 +1378,7 @@ class SlideshowViewer(QDialog):
             self._log(f"❌ Error en detección: {e}")
             return
 
-        _, w = self.working_image.shape[:2]
+        _, w = self.navigation.working_image.shape[:2]
         self.detected_marks = []
         for d in detections:
             x1, y1, x2, y2 = d['bbox']
@@ -1726,7 +1401,7 @@ class SlideshowViewer(QDialog):
                     cx = int((x1 + x2) / 2)
                     cy = int((y1 + y2) / 2)
                     final_x, final_y = find_wm(
-                        self.working_image,
+                        self.navigation.working_image,
                         wm_array,
                         radio=80,
                         center_x=cx,
@@ -1767,7 +1442,7 @@ class SlideshowViewer(QDialog):
         """Carga X/Y del mark seleccionado en los spinbox y refresca highlight."""
         if row < 0 or row >= len(self.detected_marks):
             self.selected_mark_index = -1
-            self._apply_zoom()
+            self.navigation._apply_zoom()
             return
         self.selected_mark_index = row
         mark = self.detected_marks[row]
@@ -1799,13 +1474,13 @@ class SlideshowViewer(QDialog):
 
     def _refresh_auto_preview(self):
         """Construye auto_preview_image aplicando quick_align_preview a todas las marcas."""
-        if self.working_image is None:
+        if self.navigation.working_image is None:
             self.auto_preview_image = None
-            self._apply_zoom()
+            self.navigation._apply_zoom()
             return
 
         if self.auto_quick_preview_checkbox.isChecked() and self.detected_marks:
-            result = self.working_image.copy()
+            result = self.navigation.working_image.copy()
             for mark in self.detected_marks:
                 if mark['watermark_array'] is None:
                     continue
@@ -1818,22 +1493,22 @@ class SlideshowViewer(QDialog):
                 )
             self.auto_preview_image = result
         else:
-            self.auto_preview_image = self.working_image.copy()
+            self.auto_preview_image = self.navigation.working_image.copy()
 
-        self._apply_zoom()
+        self.navigation._apply_zoom()
 
     def _accept_auto_detections(self):
         """Aplica remove_watermark a todas las marcas y guarda. También recopila datos."""
         if not self.detected_marks:
             self._log("⚠️ Sin detecciones para aplicar")
             return
-        if self.working_image is None:
+        if self.navigation.working_image is None:
             return
-        if not self.output_folder:
-            self._create_output_folder()
+        if not self.navigation.output_folder:
+            self.navigation._create_output_folder()
 
-        current_file = self.image_files[self.current_index]
-        base = self.working_image  # imagen previa al accept (para training data)
+        current_file = self.navigation.image_files[self.navigation.current_index]
+        base = self.navigation.working_image  # imagen previa al accept (para training data)
         result = base.copy()
         applied = 0
 
@@ -1872,9 +1547,9 @@ class SlideshowViewer(QDialog):
             self._log("⚠️ Sin marcas removibles (todas sin PNG)")
             return
 
-        self.working_image = result
-        guardar(current_file, result, self.output_folder)
-        self.processed_images.add(self.current_index)
+        self.navigation.working_image = result
+        guardar(current_file, result, self.navigation.output_folder)
+        self.navigation.processed_images.add(self.navigation.current_index)
         self._update_counts_label()
         self._log(f"✅ {applied} marca(s) removida(s) en {current_file.name}")
 
@@ -1882,7 +1557,7 @@ class SlideshowViewer(QDialog):
         self.selected_mark_index = -1
         self.auto_preview_image = None
         self.detections_list.clear()
-        self._apply_zoom()
+        self.navigation._apply_zoom()
 
     def _finish_review(self):
         """Finaliza la revisión y permite continuar con el proceso"""
@@ -1931,12 +1606,12 @@ class SlideshowViewer(QDialog):
         click_pos = event.pos()
 
         # Convertir a coordenadas de la imagen (considerando el scroll)
-        scroll_pos = self.scroll_area.mapFrom(self, click_pos)
-        viewport_pos = self.scroll_area.viewport().mapFrom(self.scroll_area, scroll_pos)
+        scroll_pos = self.navigation.scroll_area.mapFrom(self, click_pos)
+        viewport_pos = self.navigation.scroll_area.viewport().mapFrom(self.navigation.scroll_area, scroll_pos)
 
         # Ajustar por el scroll offset
-        image_x = viewport_pos.x() + self.scroll_area.horizontalScrollBar().value()
-        image_y = viewport_pos.y() + self.scroll_area.verticalScrollBar().value()
+        image_x = viewport_pos.x() + self.navigation.scroll_area.horizontalScrollBar().value()
+        image_y = viewport_pos.y() + self.navigation.scroll_area.verticalScrollBar().value()
 
         # Verificar si el click está dentro de algún rectángulo
         for pos_name, rect_data in self.watermark_rectangles.items():
@@ -1952,52 +1627,44 @@ class SlideshowViewer(QDialog):
 
         super().mousePressEvent(event)
 
-    def wheelEvent(self, event: QWheelEvent):
-        """Maneja el zoom con Ctrl + rueda del mouse"""
-        if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            # Ctrl está presionado - hacer zoom
-            delta = event.angleDelta().y()
-            zoom_change = 10 if delta > 0 else -10
-            new_zoom = self.zoom_level + zoom_change
-            self._set_zoom(new_zoom)
-            event.accept()
-        else:
-            # Sin Ctrl - comportamiento normal de scroll
-            super().wheelEvent(event)
+    # wheelEvent migrado a NavigationController.wheelEvent (Plan 02-01 Task 2).
+    # El NavigationController owns image_label y scroll_area, asi que es el
+    # natural owner del wheel zoom (Ctrl + rueda).
 
     def keyPressEvent(self, event: QKeyEvent):
-        """Maneja los eventos de teclado"""
+        """Maneja los eventos de teclado — delega zoom y navegacion a NavigationController."""
         key = event.key()
 
-        # Teclas de zoom
+        # Teclas de zoom (delegadas al NavigationController)
         if key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
-            # Ctrl + Plus: Zoom in
-            self._set_zoom(self.zoom_level + 10)
+            self.navigation.adjust_zoom(10)
             event.accept()
             return
         elif key == Qt.Key.Key_Minus:
-            # Ctrl + Minus: Zoom out
-            self._set_zoom(self.zoom_level - 10)
+            self.navigation.adjust_zoom(-10)
             event.accept()
             return
         elif key == Qt.Key.Key_0:
-            # Ctrl + 0: Reset zoom
-            self._set_zoom(100)
+            self.navigation.set_zoom_level(100)
             event.accept()
             return
 
-        # Navegación normal
+        # Navegación normal — guard load-bearing (RESEARCH Pitfall 2):
+        # si hay preview activo en modo manual, Space/Backspace van a accept/revert.
+        # check_opc_avanzadas and self.is_preview_active es load-bearing (preservar verbatim).
         check_opc_avanzadas = self.opciones_avanzadas.isChecked()
         if key == Qt.Key.Key_Space:
             if check_opc_avanzadas and self.is_preview_active:
                 self._accept_preview()
             else:
-                self._next_image()
+                self.navigation.request_next()
+            return
         elif key == Qt.Key.Key_Backspace:
             if check_opc_avanzadas and self.is_preview_active:
                 self._revert_preview()
             else:
-                self._previous_image()
+                self.navigation.request_previous()
+            return
         # elif key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
         #     self._finish_review()
         # elif key == Qt.Key.Key_Escape:
@@ -2011,11 +1678,11 @@ class SlideshowViewer(QDialog):
 
     def get_output_folder(self) -> Path:
         """Retorna la carpeta de salida donde se guardaron las imágenes procesadas"""
-        return self.output_folder
+        return self.navigation.output_folder
 
     def has_processed_images(self) -> bool:
         """Retorna True si se procesó al menos una imagen"""
-        return len(self.processed_images) > 0
+        return len(self.navigation.processed_images) > 0
 
 
 # Para pruebas independientes
