@@ -51,12 +51,18 @@ Plans:
   3. La recopilación de training data (save/remove sample) opera desde su propio componente sin acoplar el visor
   4. SlideshowViewer tiene 20 o menos edges de dependencia directa (reducción desde 63 actuales)
   5. El comportamiento observable del visor es idéntico al anterior — el usuario no nota ningún cambio funcional
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 02-01: Extraer componente de navegación (estado de índice, avance/retroceso, carga de imagen)
-- [ ] 02-02: Extraer componente de procesamiento de watermarks (lógica YOLO + remove_watermark)
-- [ ] 02-03: Extraer componente de training data collection y ensamblar en SlideshowViewer
+
+**Wave 1**
+- [ ] 02-01-PLAN.md — Crear paquete components/ con stubs + extraer NavigationController (navegación, render, zoom, output_folder)
+
+**Wave 2** *(blocked on Wave 1)*
+- [ ] 02-02-PLAN.md — Extraer WatermarkProcessor (manual + auto YOLO + posiciones guardadas + crop + máquina de eventos atómicos) y restaurar overlays via signal/slot decorate_pixmap
+
+**Wave 3** *(blocked on Wave 2)*
+- [ ] 02-03-PLAN.md — Extraer TrainingDataCollector + reducir SlideshowViewer a composer puro + verificar edge count ≤20 (UAT manual + 02-EDGE-COUNT.md)
 
 ### Phase 3: Logic/Widget Separation
 **Goal**: Los widgets de WatermarkRemove solo coordinan y presentan — ninguna lógica de dominio vive dentro de un widget, y WatermarkTab es un coordinador puro
