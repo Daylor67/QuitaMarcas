@@ -1,41 +1,32 @@
-"""
-Visor de imagenes tipo slideshow - Navega con Space y Backspace
+"""Visor de imagenes tipo slideshow — composer puro tras Phase 2.
 
-Tras Phase 2 (Plan 02-01 + Plan 02-02), `SlideshowViewer` es un composer adelgazado:
-solo instancia los componentes hijos (NavigationController + WatermarkProcessor +
-TrainingDataCollector), wire sus signals, y conserva el contrato externo:
+`SlideshowViewer` solo instancia los componentes hijos (NavigationController +
+WatermarkProcessor + TrainingDataCollector), cablea sus signals en `_wire_signals`,
+arma el layout, y conserva el contrato externo con `gui/controller.py`:
 
-- Constructor `(folder_path: str, parent=None, watermark_tab=None)`
-- Signal `review_completed = Signal(bool)`
-- Metodos publicos `get_approved`, `get_output_folder`, `has_processed_images`
+- Constructor (folder_path, parent, watermark_tab)
+- Senal review_completed (bool)
+- Metodos publicos get_approved / get_output_folder / has_processed_images
 
-Toda la logica de procesamiento (manual mode, auto YOLO, position-grid, crop, alpha/offset
-spinboxes) vive en `WatermarkProcessor`. Toda la navegacion + render + zoom + counter
-viven en `NavigationController`. El conteo de training data (Plan 03) vivira en
-`TrainingDataCollector` — todavia stub mientras se ejecuta esa fase.
-
-Conservados aqui:
-- `_update_counts_label` (todavia inline, migra en Plan 03)
-- `_finish_review` / `_cancel_review` (acciones del QDialog)
-- `keyPressEvent` con guard load-bearing: si processor tiene preview activo,
-  Space/Backspace van a accept/revert; sino, delegan a navigation
-- `_on_navigation_resize_requested` (slot que ejecuta el resize del QDialog)
+Procesamiento (manual, auto YOLO, position-grid, crop) vive en WatermarkProcessor;
+navegacion + render + zoom + counter en NavigationController; conteo de training
+data en TrainingDataCollector. `keyPressEvent` mantiene el guard load-bearing:
+si el processor tiene preview activo, Space/Backspace van a accept/revert.
 """
 import os
 import sys
 from pathlib import Path
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget,
+    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QWidget,
     QScrollArea, QGroupBox, QMessageBox,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeyEvent
 
-# Agregar el directorio raiz al path
-current_dir = os.path.abspath(os.path.dirname(__file__))
-parent_dir = os.path.dirname(os.path.dirname(current_dir))
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
+# Agregar el directorio raiz al path (bootstrap para importar el package).
+_parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _parent_dir not in sys.path:
+    sys.path.insert(0, _parent_dir)
 
 from WatermarkRemove.ui.components import (
     NavigationController, WatermarkProcessor, TrainingDataCollector,
@@ -43,22 +34,11 @@ from WatermarkRemove.ui.components import (
 
 
 class SlideshowViewer(QDialog):
-    """
-    Visor de imagenes estilo slideshow con navegacion por teclado y procesamiento de marcas.
+    """Composer puro tras Phase 2: instancia componentes hijos, conecta sus
+    signals y expone API publica estable (contrato con `gui/controller.py:321`).
 
-    Es un composer puro tras Phase 2: instancia componentes hijos, conecta sus signals,
-    expone API publica estable (contrato con `gui/controller.py:321`).
-
-    Controles de navegacion:
-        - Space: Siguiente imagen (o Accept preview si manual mode activo)
-        - Backspace: Imagen anterior (o Revert preview si manual mode activo)
-        - Enter: Finalizar revision
-        - Escape: Cancelar proceso
-
-    Controles de zoom (delegados a NavigationController):
-        - Ctrl + Rueda: Zoom in/out
-        - Plus/Minus: Zoom in/out
-        - 0: Reset zoom al 100%
+    Controles: Space=siguiente/accept, Backspace=anterior/revert, Enter=finalizar,
+    Escape=cancelar; zoom (Ctrl+rueda / Plus-Minus / 0) delegado a NavigationController.
     """
 
     # Senal preservada — consumida por gui/controller.py:321
@@ -67,26 +47,20 @@ class SlideshowViewer(QDialog):
     def __init__(self, folder_path: str, parent=None, watermark_tab=None):
         super().__init__(parent)
 
-        # === Estado del composer ===
+        # Estado del composer
         self.user_approved = False
         self.watermark_tab = watermark_tab
         self.controls_panel_width = 280
 
-        # === Instanciar componentes hijos ===
+        # Instanciar componentes hijos
         self.navigation = NavigationController(folder_path, parent=self, watermark_tab=watermark_tab)
         self.processor = WatermarkProcessor(parent=self, watermark_tab=watermark_tab)
         self.collector = TrainingDataCollector(parent=self, watermark_tab=watermark_tab)
 
-        # === Wire signals ANTES de _setup_ui (para que callbacks iniciales del processor
-        # tengan al composer correctamente cableado).
+        # Wire signals ANTES de _setup_ui (callbacks iniciales necesitan el cableado), luego UI.
         self._wire_signals()
-
-        # === Construir UI propia ===
         self._setup_ui()
 
-    # ===================================================================
-    # Signal wiring entre componentes
-    # ===================================================================
     def _wire_signals(self):
         """Conecta signals processor↔navigation y composer↔components."""
 
@@ -109,33 +83,23 @@ class SlideshowViewer(QDialog):
         self.processor.manual_tracking_requested.connect(self.navigation.set_mouse_tracking)
         self.processor.manual_overlay_visibility.connect(self.navigation.set_manual_overlay_visible)
         self.processor.manual_overlay_geometry.connect(self.navigation.set_manual_overlay_geometry)
-
-        # --- Wire decorate_pixmap callback (restaura overlays de posiciones y crop) ---
+        # decorate_pixmap callback restaura overlays de posiciones y crop
         self.navigation.set_processor_decorator(self.processor.decorate_pixmap)
 
         # --- Navigation -> composer ---
         self.navigation.window_resize_requested.connect(self._on_navigation_resize_requested)
         self.navigation.finish_requested.connect(self._finish_review)
 
-        # --- Processor -> Collector (Plan 03 wire training data) ---
-        # El collector existe como stub; cuando Plan 03 lo implemente, estos slots ya estan listos.
-        if hasattr(self.collector, 'on_image_processed'):
-            self.processor.image_processed.connect(self.collector.on_image_processed)
-        if hasattr(self.collector, 'on_image_reset'):
-            self.processor.image_reset.connect(self.collector.on_image_reset)
-        if hasattr(self.collector, 'on_counts_changed'):
-            self.processor.counts_changed.connect(self.collector.on_counts_changed)
+        # --- Processor -> Collector (Plan 03 — cada accept/reset alimenta el collector) ---
+        self.processor.image_processed.connect(self.collector.on_image_processed)
+        self.processor.image_reset.connect(self.collector.on_image_reset)
+        self.processor.counts_changed.connect(self.collector.on_counts_changed)
 
-        # --- Procesador "Guardar y Siguiente" debe gatillar request_next ---
-        # Replica del patron original (lineas 428-429 del slideshow_viewer.py pre-refactor)
-        # donde el boton tenia conectado dos slots: accept + next.
+        # --- "Guardar y Siguiente" gatilla request_next (replica patron original) ---
         self.processor.auto_accept_next_btn.clicked.connect(self.navigation.request_next)
 
-    # ===================================================================
-    # UI setup (panel izquierdo composer + processor + collector apilados)
-    # ===================================================================
     def _setup_ui(self):
-        """Configura la interfaz de usuario con layout horizontal."""
+        """Layout horizontal: panel de controles (izq, 280px) + navigation (der)."""
         self.setWindowTitle("Revisión de Imágenes")
         self.setModal(True)
         self.resize(900, 650)
@@ -144,11 +108,7 @@ class SlideshowViewer(QDialog):
         main_layout.setSpacing(15)
         main_layout.setContentsMargins(10, 10, 10, 10)
 
-        # === PANEL IZQUIERDO: Controles (fijo 280px) ===
-        left_panel = self._create_controls_panel()
-        main_layout.addWidget(left_panel)
-
-        # === PANEL DERECHO: NavigationController ===
+        main_layout.addWidget(self._create_controls_panel())
         main_layout.addWidget(self.navigation, 1)
 
     def _on_navigation_resize_requested(self, width: int, height: int):
@@ -156,13 +116,8 @@ class SlideshowViewer(QDialog):
         self.resize(width, self.height())
 
     def _create_controls_panel(self) -> QWidget:
-        """Crea el panel de controles (izquierda) con scroll vertical.
-
-        El panel contiene (top-down):
-            1. WatermarkProcessor (con sus GroupBoxes propios: Seleccion + Auto)
-            2. Grupo "Navegacion" (finish + cancel buttons — sin prev/next que viven en navigation)
-            3. Grupo "Datos recopilados" (conteo — todavia inline hasta Plan 03)
-        """
+        """Panel de controles (izquierda, scroll vertical): WatermarkProcessor +
+        grupo Navegacion (finish/cancel) + TrainingDataCollector (conteo)."""
         panel = QWidget()
         panel.setFixedWidth(self.controls_panel_width)
 
@@ -206,71 +161,18 @@ class SlideshowViewer(QDialog):
 
         layout.addWidget(nav_group)
 
-        # === 3. Conteo de datos de entrenamiento (todavia inline — migra Plan 03) ===
-        conteo_group = QGroupBox("📊 Datos recopilados")
-        conteo_layout = QVBoxLayout(conteo_group)
-        conteo_layout.setSpacing(4)
-        conteo_layout.setContentsMargins(8, 6, 8, 6)
-
-        self.training_counts_label = QLabel("Sin datos aún")
-        self.training_counts_label.setStyleSheet(
-            "color: #aaaaaa; font-size: 10px; font-family: monospace;"
-        )
-        self.training_counts_label.setWordWrap(True)
-        conteo_layout.addWidget(self.training_counts_label)
-
-        layout.addWidget(conteo_group)
-        self._update_counts_label()
-
-        # Refrescar conteos cada vez que el processor emita counts_changed
-        self.processor.counts_changed.connect(self._update_counts_label)
-
+        # === 3. TrainingDataCollector (su propio GroupBox "Datos recopilados") ===
+        layout.addWidget(self.collector)
         layout.addStretch(1)
-
         return panel
 
-    def _update_counts_label(self):
-        """Lee training_data.json y actualiza el conteo de muestras por clase.
-
-        TODO Plan 03: este metodo migra al TrainingDataCollector.
-        """
-        import json as _json
-
-        training_json = Path(os.path.dirname(current_dir)) / 'WatermarkRemove' / 'training_data.json'
-        # current_dir = WatermarkRemove/ui/ ; queremos WatermarkRemove/training_data.json
-        # os.path.dirname(current_dir) = WatermarkRemove/  ya correctamente
-        training_json = Path(os.path.dirname(current_dir)) / 'training_data.json'
-        try:
-            if not training_json.exists():
-                self.training_counts_label.setText("Sin datos aún")
-                return
-            data = _json.loads(training_json.read_text(encoding='utf-8'))
-            if not data:
-                self.training_counts_label.setText("Sin datos aún")
-                return
-
-            counts: dict = {}
-            for entry in data:
-                cls = entry.get('class_type', '?')
-                counts[cls] = counts.get(cls, 0) + 1
-
-            lines = [f"{cls}: {n}" for cls, n in sorted(counts.items())]
-            total = sum(counts.values())
-            lines.append(f"─────────\nTotal: {total}")
-            self.training_counts_label.setText("\n".join(lines))
-        except Exception:
-            self.training_counts_label.setText("Sin datos aún")
-
     def _log(self, message: str):
-        """Logger del composer — todavia usado por _finish_review/_cancel_review en logs futuros."""
+        """Logger del composer (fallback a print)."""
         if self.watermark_tab and hasattr(self.watermark_tab, 'log'):
             self.watermark_tab.log(message)
         else:
             print(message)
 
-    # ===================================================================
-    # Acciones del dialogo (finalizar / cancelar)
-    # ===================================================================
     def _finish_review(self):
         """Finaliza la revision y permite continuar con el proceso."""
         reply = QMessageBox.question(
@@ -297,15 +199,11 @@ class SlideshowViewer(QDialog):
         self.review_completed.emit(False)
         self.reject()
 
-    # ===================================================================
-    # keyPressEvent — guard load-bearing: processor preview > navigation
-    # ===================================================================
     def keyPressEvent(self, event: QKeyEvent):
-        """Maneja eventos de teclado — delega zoom y navegacion a NavigationController.
+        """Delega zoom y navegacion a NavigationController.
 
-        Guard load-bearing (RESEARCH Pitfall 2): si hay preview activo en el processor,
-        Space/Backspace van a accept/revert. El check `processor.is_preview_active()`
-        DEBE ir ANTES de la delegacion a navigation.
+        Guard load-bearing (RESEARCH Pitfall 2): si el processor tiene preview activo,
+        Space/Backspace van a accept/revert ANTES de delegar a navigation.
         """
         key = event.key()
 
@@ -346,9 +244,7 @@ class SlideshowViewer(QDialog):
 
         super().keyPressEvent(event)
 
-    # ===================================================================
     # API publica (contrato con gui/controller.py:321 — PRESERVAR)
-    # ===================================================================
     def get_approved(self) -> bool:
         """Retorna si el usuario aprobo continuar con el proceso."""
         return self.user_approved
