@@ -106,7 +106,13 @@ class PositionEditorService:
             side_y=side_y,
         )
         result_img = remove_watermark(img_copy, watermark, x, y)
+        # Normalizar a 3 canales BGR antes de convertir (BGRA puede venir de
+        # cv2.IMREAD_UNCHANGED). Sin esto, COLOR_BGR2RGB falla en tiempo de
+        # ejecucion con imagenes de 4 canales.
+        if result_img.ndim == 3 and result_img.shape[2] == 4:
+            result_img = cv2.cvtColor(result_img, cv2.COLOR_BGRA2BGR)
         result_rgb = cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB)
-        h, w, _ = result_rgb.shape
-        q_image = QImage(result_rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
-        return QPixmap.fromImage(q_image)
+        h, w, ch = result_rgb.shape
+        q_image = QImage(result_rgb.data, w, h, ch * w, QImage.Format.Format_RGB888)
+        # Forzar copia del buffer para evitar dependencia del array numpy
+        return QPixmap.fromImage(q_image.copy())
