@@ -178,7 +178,131 @@ QAbstractItemView::indicator:checked {
 
 """
 
+WM_STYLE_SHEET = """
+/* ================================================================
+   WatermarkRemove — SlideshowViewer specific styles (Phase 4)
+   Aplicados via setObjectName() en los componentes. No usar
+   setStyleSheet() inline en los componentes — todo va aquí (D-12).
+   ================================================================ */
+
+/* Contador de imagen: acento teal (reemplaza #2196F3 hardcodeado) */
+QLabel#wm-counter {
+    font-size: 15px;
+    font-weight: bold;
+    color: #26EE9F;
+    padding: 5px;
+}
+
+/* Nombre de archivo: fondo oscuro sutil */
+QLabel#wm-filename {
+    font-size: 12px;
+    color: #888888;
+    padding: 8px;
+    background-color: #1e1e1e;
+    border-radius: 5px;
+}
+
+/* Scroll area del visor de imagen */
+QScrollArea#wm-image-scroll {
+    border: 2px solid #444444;
+    background-color: #2b2b2b;
+}
+
+QLabel#wm-image-label {
+    background-color: #2b2b2b;
+}
+
+/* Label de conteo de training data */
+QLabel#wm-training-counts {
+    color: #aaaaaa;
+    font-size: 10px;
+    font-family: monospace;
+}
+
+/* Botones del selector de modo (checkables, estilo tab) */
+QPushButton#wm-mode-btn {
+    border: 1px solid #444444;
+    border-radius: 0px;
+    padding: 4px 8px;
+}
+QPushButton#wm-mode-btn:checked {
+    background-color: rgba(38, 238, 159, 0.2);
+    border-bottom: 2px solid #26EE9F;
+    color: #26EE9F;
+}
+QPushButton#wm-mode-btn:disabled {
+    color: #666666;
+    background-color: transparent;
+}
+QPushButton#wm-mode-btn:hover:!checked:!disabled {
+    background-color: rgba(38, 238, 159, 0.08);
+}
+
+/* Aceptar / Guardar (verde semántico — acción positiva) */
+QPushButton#wm-accept-btn {
+    background-color: #4CAF50;
+    color: white;
+    font-weight: bold;
+}
+QPushButton#wm-accept-btn:hover {
+    background-color: #66BB6A;
+}
+QPushButton#wm-accept-btn:pressed {
+    background-color: #388E3C;
+}
+
+/* Revertir / Cancelar (rojo semántico — acción destructiva) */
+QPushButton#wm-revert-btn,
+QPushButton#wm-cancel-btn {
+    background-color: #f44336;
+    color: white;
+}
+QPushButton#wm-revert-btn:hover,
+QPushButton#wm-cancel-btn:hover {
+    background-color: #ef5350;
+}
+QPushButton#wm-revert-btn:pressed,
+QPushButton#wm-cancel-btn:pressed {
+    background-color: #c62828;
+}
+
+/* Finalizar y Procesar (acento teal — acción principal positiva) */
+QPushButton#wm-finish-btn {
+    background-color: #26EE9F;
+    color: #1a3d31;
+    font-weight: bold;
+}
+QPushButton#wm-finish-btn:hover {
+    background-color: rgba(38, 238, 159, 0.85);
+}
+QPushButton#wm-finish-btn:pressed {
+    background-color: rgba(38, 238, 159, 0.65);
+}
+
+/* Reset imagen (naranja neutro — acción reversible pero de riesgo) */
+QPushButton#wm-reset-btn {
+    background-color: #FF9800;
+    color: white;
+    font-weight: bold;
+}
+QPushButton#wm-reset-btn:hover {
+    background-color: #FFA726;
+}
+
+/* Aplicar recorte y Guardar y Siguiente (teal — acción de avance) */
+QPushButton#wm-crop-apply-btn,
+QPushButton#wm-save-next-btn {
+    background-color: #26EE9F;
+    color: #1a3d31;
+    font-weight: bold;
+}
+QPushButton#wm-crop-apply-btn:hover,
+QPushButton#wm-save-next-btn:hover {
+    background-color: rgba(38, 238, 159, 0.85);
+}
+"""
+
 
 def load_styling():
     main_styles = load_stylesheet('dark')
-    return main_styles #+ LIGHT_STYLE_SHEET
+    return main_styles + WM_STYLE_SHEET
