@@ -89,8 +89,6 @@ def initialize_gui():
         folder_arg = sys.argv[1]
         if os.path.isdir(folder_arg):
             MainWindow.inputField.setText(folder_arg)
-    # Verificar actualizaciones al inicio
-    check_for_updates()
 
 
 def on_load(load_profiles=True):
@@ -341,39 +339,3 @@ def launch_process_async():
     # Si llegó aquí, el usuario aprobó o el checkbox no estaba activado -> iniciar proceso
     update_process_progress(0, "Iniciando procesamiento...")
     processThread.start()
-
-
-def check_for_updates():
-    """Verifica si hay actualizaciones disponibles al iniciar la aplicación"""
-    try:
-        from PySide6.QtCore import QTimer
-
-        # Usar QTimer para no bloquear el inicio de la aplicación
-        def do_check():
-            updater = UpdateChecker()
-            has_update, latest_version, download_url, release_notes = updater.check_for_updates()
-
-            if has_update and download_url:
-                # Verificar si el usuario ya rechazó esta versión anteriormente
-                skipped_version = settings.current_settings.__dict__.get("skipped_update_version", "")
-
-                # Solo mostrar el diálogo si es una versión diferente a la rechazada
-                if skipped_version != latest_version:
-                    # Mostrar diálogo de actualización
-                    dialog = UpdateDialog(
-                        MainWindow,
-                        APP_VERSION,
-                        latest_version,
-                        download_url,
-                        release_notes
-                    )
-                    dialog.exec()
-                else:
-                    print(f"Actualización v{latest_version} fue rechazada previamente. No se mostrará el diálogo.")
-
-        # Verificar actualizaciones 2 segundos después de que se muestre la ventana
-        QTimer.singleShot(2000, do_check)
-
-    except Exception as e:
-        # Si falla la verificación, continuar normalmente sin mostrar error
-        print(f"No se pudo verificar actualizaciones: {e}")
