@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: JSON Persistence** - Unificar SettingsHandler y UtilJson en un único servicio de persistencia (completed 2026-05-26)
 - [ ] **Phase 2: SlideshowViewer Decomposition** - Descomponer el God Class en componentes de responsabilidad única
-- [ ] **Phase 3: Logic/Widget Separation** - Separar lógica de negocio de widgets y convertir WatermarkTab en coordinador puro
+- [x] **Phase 3: Logic/Widget Separation** - Separar lógica de negocio de widgets y convertir WatermarkTab en coordinador puro (completed 2026-05-28)
 - [ ] **Phase 4: Visual Polish** - Rebalancear layout, reorganizar controles y aplicar estilo consistente con SmartStitch
 
 ## Phase Details
@@ -82,7 +82,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 - [x] 03-02-PLAN.md — Refactorizar position_editor.py e image_viewer.py para delegar dominio a servicios (ARCH-02)
-- [ ] 03-03-PLAN.md — Refactorizar watermark_tab.py como coordinador puro (winreg → ContextMenuService, alias apply_settings) + UAT manual final (ARCH-04)
+- [x] 03-03-PLAN.md — Refactorizar watermark_tab.py como coordinador puro (winreg → ContextMenuService, alias apply_settings) + UAT manual final (ARCH-04)
 
 ### Phase 4: Visual Polish
 **Goal**: La interfaz de WatermarkRemove es visualmente coherente con SmartStitch y el visor de imagen domina el espacio disponible
@@ -111,5 +111,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. JSON Persistence | 2/2 | Complete    | 2026-05-26 |
 | 2. SlideshowViewer Decomposition | 3/3 | Complete    | 2026-05-27 |
-| 3. Logic/Widget Separation | 2/3 | In Progress|  |
+| 3. Logic/Widget Separation | 3/3 | Complete   | 2026-05-28 |
 | 4. Visual Polish | 0/3 | Not started | - |
