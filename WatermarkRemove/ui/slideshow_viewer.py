@@ -19,6 +19,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QWidget,
     QGroupBox, QMessageBox, QSplitter,
+    QStackedWidget, QButtonGroup,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeyEvent
@@ -148,39 +149,79 @@ class SlideshowViewer(QDialog):
         self.resize(width, self.height())
 
     def _create_controls_panel(self) -> QWidget:
-        """Panel de controles (izquierda del splitter): WatermarkProcessor +
-        grupo Navegacion (finish/cancel) + TrainingDataCollector.
+        """Panel de controles (izquierda del splitter) — Phase 4 D-04.
 
-        Sin scroll wrapper (D-03) y sin ancho fijo (D-01 — el splitter lo controla).
+        Estructura vertical:
+          1. Grupo Navegación (QGroupBox permanente — prev/next + contador + filename + finish/cancel)
+          2. Selector de modo (QButtonGroup con 3 QPushButton checkables)
+          3. QStackedWidget (página 0=Selección, 1=Recorte, 2=Automático)
+          4. Grupo Training Data (QGroupBox permanente — TrainingDataCollector)
         """
         panel = QWidget()
         layout = QVBoxLayout(panel)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
         layout.setContentsMargins(0, 0, 6, 0)
 
-        # === 1. WatermarkProcessor (sus GroupBoxes "Seleccion" + "Auto") ===
-        layout.addWidget(self.processor)
+        # === 1. Grupo Navegación ===
+        # create_nav_controls_widget() retorna un QGroupBox "Navegación" con
+        # counter_label, filename_label, prev_btn, next_btn ya conectados.
+        nav_widget = self.navigation.create_nav_controls_widget()
+        # Agregar finish_btn y cancel_btn al QGroupBox de navegación
+        nav_inner_layout = nav_widget.layout()  # QVBoxLayout definido en create_nav_controls_widget
 
-        # === 2. Grupo Navegacion (finish + cancel) ===
-        nav_group = QGroupBox("Navegación")
-        nav_action_layout = QHBoxLayout(nav_group)
-        nav_action_layout.setSpacing(5)
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(5)
 
         self.finish_btn = QPushButton("Finalizar y Procesar")
         self.finish_btn.clicked.connect(self._finish_review)
         self.finish_btn.setMaximumHeight(40)
-        nav_action_layout.addWidget(self.finish_btn)
+        btn_row.addWidget(self.finish_btn)
 
         self.cancel_btn = QPushButton("Cancelar")
         self.cancel_btn.clicked.connect(self._cancel_review)
         self.cancel_btn.setMaximumHeight(40)
-        nav_action_layout.addWidget(self.cancel_btn)
+        btn_row.addWidget(self.cancel_btn)
 
-        layout.addWidget(nav_group)
+        nav_inner_layout.addLayout(btn_row)  # addLayout (no addItem) para agregar QHBoxLayout
+        layout.addWidget(nav_widget)
 
-        # === 3. TrainingDataCollector (su propio GroupBox "Datos recopilados") ===
+        # === 2. Selector de Modo (QButtonGroup checkable, estilo tab) ===
+        mode_selector = QWidget()
+        mode_layout = QHBoxLayout(mode_selector)
+        mode_layout.setSpacing(2)
+        mode_layout.setContentsMargins(0, 0, 0, 0)
+
+        self._mode_group = QButtonGroup(self)
+        self._mode_group.setExclusive(True)
+
+        mode_labels = ["Selección", "Recorte", "Automático"]
+        for i, label in enumerate(mode_labels):
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setObjectName("wm-mode-btn")
+            self._mode_group.addButton(btn, i)
+            mode_layout.addWidget(btn)
+
+        # Selección activo por defecto
+        self._mode_group.button(0).setChecked(True)
+        layout.addWidget(mode_selector)
+
+        # Deshabilitar botón Automático si YOLO no está disponible (D-08)
+        self._check_yolo_availability()
+
+        # === 3. QStackedWidget — una página por modo ===
+        self._mode_stack = QStackedWidget()
+        self._mode_stack.addWidget(self.processor.panel_seleccion)   # página 0
+        self._mode_stack.addWidget(self.processor.panel_recorte)     # página 1
+        self._mode_stack.addWidget(self.processor.panel_auto)        # página 2
+        self._mode_stack.setCurrentIndex(0)
+
+        self._mode_group.idClicked.connect(self._on_mode_changed)
+        layout.addWidget(self._mode_stack, 1)
+
+        # === 4. Grupo Training Data ===
         layout.addWidget(self.collector)
-        layout.addStretch(1)
+
         return panel
 
     def _on_splitter_moved(self, pos: int, index: int):
@@ -191,6 +232,36 @@ class SlideshowViewer(QDialog):
         """Persiste el tamaño del splitter al cerrar el diálogo (D-02)."""
         wm_persistence.set_splitter_sizes(list(self._splitter.sizes()))
         super().closeEvent(event)
+
+    def _on_mode_changed(self, mode_index: int):
+        """Slot: el QButtonGroup del selector de modo emitió idClicked.
+
+        Actualiza el QStackedWidget y notifica al processor para que ajuste
+        su estado interno (D-06).
+        """
+        self._mode_stack.setCurrentIndex(mode_index)
+        self.processor.set_mode(mode_index)
+
+    def _check_yolo_availability(self):
+        """Verifica si el modelo YOLO está disponible al iniciar (D-08).
+
+        La importación de auto_detector no falla incluso sin el modelo .onnx;
+        el error ocurre al llamar detect_watermarks(). Verificar el archivo
+        del modelo directamente.
+        """
+        try:
+            import os
+            from pathlib import Path
+            # El modelo vive en WatermarkRemove/yolo/ — buscar cualquier .onnx
+            yolo_dir = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) / 'yolo'
+            has_model = any(yolo_dir.glob('*.onnx')) if yolo_dir.exists() else False
+            if not has_model:
+                auto_btn = self._mode_group.button(2)
+                if auto_btn is not None:
+                    auto_btn.setEnabled(False)
+        except Exception:
+            # Si algo falla, no deshabilitar — mejor fallar luego en el intento de detección
+            pass
 
     def _log(self, message: str):
         """Logger del composer (fallback a print)."""
