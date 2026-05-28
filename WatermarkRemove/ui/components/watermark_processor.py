@@ -128,6 +128,11 @@ class WatermarkProcessor(QWidget):
         # Alpha por marca de agua
         self.watermark_alpha_values: dict = {}
 
+        # Estado de overlays procesados por imagen: {str(file_path): set(pos_names)}
+        # Persiste al navegar entre imágenes para mostrar verde al volver.
+        # Click no-acumulativo (izquierdo) limpia solo la entrada de la imagen actual.
+        self._processed_positions_by_image: dict = {}
+
         # === Cache local de navigation state (alimentado por slots) ===
         self._current_index: int = 0
         self._current_file: Optional[Path] = None
@@ -803,7 +808,7 @@ class WatermarkProcessor(QWidget):
         # Por simplicidad, lo dejamos vacio aqui (Plan 03 puede refinarlo).
         # Para esta extraccion: usamos un set vacio (verde nunca se pinta) y dependemos
         # de que el composer wire el callback adicional `set_processed_positions`.
-        processed_positions_set = getattr(self, '_processed_positions_current', set())
+        processed_positions_set = self._processed_positions_by_image.get(str(self._current_file), set())
 
         try:
             current_watermark_index = self.watermark_combo.currentIndex()
@@ -893,7 +898,8 @@ class WatermarkProcessor(QWidget):
         """Slot publico: NavigationController informa que set de posiciones ya fueron procesadas
         para la imagen actual (para pintar verde vs rojo).
         """
-        self._processed_positions_current = positions_set or set()
+        if self._current_file is not None:
+            self._processed_positions_by_image[str(self._current_file)] = positions_set or set()
 
     def _process_watermark_at_position(self, pos_name: str, rect_data: dict, is_cumulative: bool = False):
         """Procesa la marca de agua en la posicion especificada.
@@ -913,20 +919,19 @@ class WatermarkProcessor(QWidget):
                 return
 
             output_path = self._output_folder / current_file.name
+            file_key = str(self._current_file)
 
             if is_cumulative and output_path.exists():
                 image = load_images_cv2(output_path)
             else:
                 image = load_images_cv2(current_file)
-                # En modo not-cumulative, navigation debe limpiar processed_positions
-                # del current index (lo hace via on_image_processed callback).
                 if not is_cumulative:
-                    self._processed_positions_current = set()
+                    # Click izquierdo = reemplazar: esta visita empieza desde cero para esta imagen.
+                    self._processed_positions_by_image[file_key] = set()
 
             if image is None:
                 self._log(f"❌ Error cargando imagen: {current_file.name}")
                 return
-
             watermark_file = self.watermark_files[current_watermark_index]
             watermark = load_images_cv2(watermark_file)
             if watermark is None:
@@ -948,10 +953,8 @@ class WatermarkProcessor(QWidget):
 
             # Actualizar working_image local y emitir image_processed
             self._working_image = result_image
-            # Marcar esta posicion como procesada localmente
-            if not hasattr(self, '_processed_positions_current'):
-                self._processed_positions_current = set()
-            self._processed_positions_current.add(pos_name)
+            # Marcar esta posicion como procesada para esta imagen
+            self._processed_positions_by_image.setdefault(file_key, set()).add(pos_name)
 
             # Emitir image_processed con contexto completo (collector recibe training data)
             self.image_processed.emit(
@@ -993,6 +996,9 @@ class WatermarkProcessor(QWidget):
             self.reset_btn.show()
             self._log("🔍 Modo selección manual activado")
         else:
+            # Descartar preview activo antes de desactivar el modo
+            if self._preview_active:
+                self._revert_preview()
             self.manual_tracking_requested.emit(False)
             self.manual_overlay_visibility.emit(False)
             self.alpha_adjust.hide()
@@ -1005,8 +1011,6 @@ class WatermarkProcessor(QWidget):
             self.revert_btn.hide()
             # Limpiar state
             self.mouse_position = None
-            self.preview_image = None
-            self._preview_active = False
             self._log("✅ Modo selección manual desactivado")
             # Refrescar imagen
             self.request_redraw.emit()
@@ -1332,8 +1336,8 @@ class WatermarkProcessor(QWidget):
                 except Exception as e:
                     self._log(f"⚠️ No se pudo borrar {output_file.name}: {e}")
 
-        # Limpiar processed_positions local
-        self._processed_positions_current = set()
+        # Limpiar processed_positions de esta imagen
+        self._processed_positions_by_image.pop(str(current_file), None)
 
         # Emit image_reset: el collector limpia training_data.json para esta imagen
         self.image_reset.emit(current_file)
@@ -1625,14 +1629,14 @@ class WatermarkProcessor(QWidget):
             1 — Recorte: activa crop mode
             2 — Automático: activa auto detection YOLO
         """
-        # D-fix: al salir de Selección, desactivar modo avanzado (manual) si estaba activo
-        if mode_index in (1, 2) and self.manual_mode_enabled:
-            self.manual_mode_enabled = False
-            self.manual_tracking_requested.emit(False)
-            self.manual_overlay_visibility.emit(False)
-            self.opciones_avanzadas.blockSignals(True)
-            self.opciones_avanzadas.setChecked(False)
-            self.opciones_avanzadas.blockSignals(False)
+        # Si había un preview de modo avanzado activo, descartarlo antes de cambiar de modo
+        if self._preview_active:
+            self._revert_preview()
+
+        # Al salir de Selección, desactivar el manual_overlay (overlay azul) si estaba activo
+        self.manual_overlay_visibility.emit(
+            self.manual_mode_enabled and mode_index == 0
+        )
 
         if mode_index == 0:
             # Desactivar modos especiales
