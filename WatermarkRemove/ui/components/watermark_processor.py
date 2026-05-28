@@ -1334,6 +1334,7 @@ class WatermarkProcessor(QWidget):
             self.selected_mark_index = -1
             self.auto_preview_image = None
             self.detections_list.clear()
+            self.preview_changed.emit(None)  # limpiar preview cache en NavigationController
             self.request_redraw.emit()
 
     def _run_auto_detection(self):
