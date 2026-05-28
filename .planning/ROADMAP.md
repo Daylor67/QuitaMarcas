@@ -78,7 +78,7 @@ Plans:
 Plans:
 
 **Wave 1**
-- [ ] 03-01-PLAN.md — Crear servicios de dominio (PositionEditorService, folder_scan, wm_positions persistence, ContextMenuService) + barrel + artefactos Wave 0 (UAT + grep pattern)
+- [x] 03-01-PLAN.md — Crear servicios de dominio (PositionEditorService, folder_scan, wm_positions persistence, ContextMenuService) + barrel + artefactos Wave 0 (UAT + grep pattern)
 
 **Wave 2** *(blocked on Wave 1)*
 - [ ] 03-02-PLAN.md — Refactorizar position_editor.py e image_viewer.py para delegar dominio a servicios (ARCH-02)
@@ -111,5 +111,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. JSON Persistence | 2/2 | Complete    | 2026-05-26 |
 | 2. SlideshowViewer Decomposition | 3/3 | Complete    | 2026-05-27 |
-| 3. Logic/Widget Separation | 0/3 | Not started | - |
+| 3. Logic/Widget Separation | 1/3 | In Progress|  |
 | 4. Visual Polish | 0/3 | Not started | - |
