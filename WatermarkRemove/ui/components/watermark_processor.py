@@ -302,6 +302,7 @@ class WatermarkProcessor(QWidget):
         manual_confirm_layout.addWidget(self.revert_btn)
 
         seleccion_layout.addLayout(manual_confirm_layout)
+        seleccion_layout.addStretch(1)
 
         outer.addWidget(seleccion_group)
 
@@ -372,6 +373,7 @@ class WatermarkProcessor(QWidget):
 
         auto_layout.addLayout(file1)
         auto_layout.addLayout(auto_btns)
+        auto_layout.addStretch(1)
 
         self.auto_group.hide()
         outer.addWidget(self.auto_group)
@@ -1623,12 +1625,28 @@ class WatermarkProcessor(QWidget):
             if self.crop_mode_enabled:
                 self.crop_mode_enabled = False
                 self.request_redraw.emit()
+            was_auto = self.auto_mode_enabled
             if self.auto_mode_enabled:
                 self.auto_mode_enabled = False
+            if was_auto:
+                self.detected_marks = []
+                self.selected_mark_index = -1
+                self.auto_preview_image = None
+                self.detections_list.clear()
+                self.preview_changed.emit(None)
+                self.request_redraw.emit()
         elif mode_index == 1:
             # Activar modo recorte, desactivar auto
+            was_auto = self.auto_mode_enabled
             if self.auto_mode_enabled:
                 self.auto_mode_enabled = False
+            if was_auto:
+                self.detected_marks = []
+                self.selected_mark_index = -1
+                self.auto_preview_image = None
+                self.detections_list.clear()
+                self.preview_changed.emit(None)
+                self.request_redraw.emit()
             self.crop_mode_enabled = True
             self.request_redraw.emit()
         elif mode_index == 2:
