@@ -135,6 +135,7 @@ class NavigationController(QWidget):
 
         # --- Info: contador y filename label ---
         info_group = QGroupBox("ℹ️ Info")
+        self._nav_info_group = info_group   # Phase 4: para ocultarlo tras reparentar en create_nav_controls_widget
         info_layout = QVBoxLayout(info_group)
         info_layout.setSpacing(5)
 
@@ -217,6 +218,43 @@ class NavigationController(QWidget):
 
         # Exponer scroll_area para que el composer (mousePressEvent inline) pueda mapear coords
         self.scroll_area = scroll
+
+    # ===================================================================
+    # Phase 4 (D-04): widget de controles de navegacion para el panel izquierdo
+    # ===================================================================
+    def create_nav_controls_widget(self) -> 'QGroupBox':
+        """Retorna un QGroupBox 'Navegación' con los controles de navegación
+        para el panel izquierdo del QSplitter (Phase 4, D-04).
+
+        Reparenta self.counter_label, self.filename_label, self.prev_btn,
+        self.next_btn al nuevo contenedor. Los slots y conexiones existentes
+        siguen funcionando porque los objetos son los mismos.
+
+        NOTA: Oculta self._nav_info_group (el QGroupBox 'ℹ️ Info' del layout
+        de NavigationController) que queda vacío tras el reparentado, de modo
+        que NavigationController muestre solo la scroll area (imagen).
+        Solo debe llamarse una vez por instancia.
+        """
+        nav_widget = QGroupBox("Navegación")
+        nav_layout = QVBoxLayout(nav_widget)
+        nav_layout.setSpacing(5)
+        nav_layout.setContentsMargins(8, 6, 8, 6)
+
+        # Reparentar widgets ya existentes (creados en _setup_ui)
+        nav_layout.addWidget(self.counter_label)
+        nav_layout.addWidget(self.filename_label)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(5)
+        btn_row.addWidget(self.prev_btn)
+        btn_row.addWidget(self.next_btn)
+        nav_layout.addLayout(btn_row)
+
+        # Ocultar el contenedor original (queda vacío tras reparentar sus widgets)
+        if hasattr(self, '_nav_info_group'):
+            self._nav_info_group.hide()
+
+        return nav_widget
 
     # ===================================================================
     # Carga / output folder
