@@ -22,7 +22,7 @@ import sys
 # Para importar `register_context_menu` (módulo top-level del repo)
 # necesitamos el repo root, DOS niveles arriba de services/.
 _current_dir = os.path.abspath(os.path.dirname(__file__))
-_repo_root = os.path.dirname(os.path.dirname(os.path.dirname(_current_dir)))
+_repo_root = os.path.dirname(os.path.dirname(_current_dir))
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
