@@ -210,8 +210,8 @@ class WatermarkProcessor(QWidget):
         seleccion_layout.addWidget(self.crop_invert_checkbox)
 
         self.crop_apply_btn = QPushButton("Aplicar recorte")
+        self.crop_apply_btn.setObjectName("wm-crop-apply-btn")
         self.crop_apply_btn.clicked.connect(self._apply_crop)
-        self.crop_apply_btn.setStyleSheet("padding: 8px; font-size: 11px; background-color: #9C27B0; color: white; font-weight: bold;")
         self.crop_apply_btn.hide()
         seleccion_layout.addWidget(self.crop_apply_btn)
 
@@ -280,8 +280,8 @@ class WatermarkProcessor(QWidget):
             "Deshace todas las remociones de la imagen actual: borra el archivo procesado, "
             "limpia las posiciones marcadas y elimina las entradas de entrenamiento asociadas."
         )
+        self.reset_btn.setObjectName("wm-reset-btn")
         self.reset_btn.clicked.connect(self._reset_current_image)
-        self.reset_btn.setStyleSheet("padding: 8px; font-size: 11px; background-color: #FF9800; color: white; font-weight: bold;")
         self.reset_btn.hide()
         seleccion_layout.addWidget(self.reset_btn)
 
@@ -290,14 +290,14 @@ class WatermarkProcessor(QWidget):
         manual_confirm_layout.setSpacing(5)
 
         self.accept_btn = QPushButton("Aceptar")
+        self.accept_btn.setObjectName("wm-accept-btn")
         self.accept_btn.clicked.connect(self._accept_preview)
-        self.accept_btn.setStyleSheet("padding: 8px; font-size: 11px; background-color: #4CAF50; color: white; font-weight: bold;")
         self.accept_btn.hide()
         manual_confirm_layout.addWidget(self.accept_btn)
 
         self.revert_btn = QPushButton("Revertir")
+        self.revert_btn.setObjectName("wm-revert-btn")
         self.revert_btn.clicked.connect(self._revert_preview)
-        self.revert_btn.setStyleSheet("padding: 8px; font-size: 11px; background-color: #f44336; color: white; font-weight: bold;")
         self.revert_btn.hide()
         manual_confirm_layout.addWidget(self.revert_btn)
 
@@ -360,16 +360,12 @@ class WatermarkProcessor(QWidget):
         # Guardar / Guardar y siguiente
         auto_btns = QHBoxLayout()
         self.auto_accept_btn = QPushButton("✓ Guardar")
-        self.auto_accept_btn.setStyleSheet(
-            "padding: 8px; font-size: 11px; background-color: #4CAF50; color: white; font-weight: bold;"
-        )
+        self.auto_accept_btn.setObjectName("wm-accept-btn")
         self.auto_accept_btn.clicked.connect(self._accept_auto_detections)
         auto_btns.addWidget(self.auto_accept_btn)
 
         self.auto_accept_next_btn = QPushButton("✓ Guardar y Siguiente")
-        self.auto_accept_next_btn.setStyleSheet(
-            "padding: 8px; font-size: 11px; background-color: #4c7faf; color: white; font-weight: bold;"
-        )
+        self.auto_accept_next_btn.setObjectName("wm-save-next-btn")
         # Composer conecta `request_advance_after_accept` signal a navigation.request_next
         self.auto_accept_next_btn.clicked.connect(self._accept_auto_detections_and_next)
         auto_btns.addWidget(self.auto_accept_next_btn)

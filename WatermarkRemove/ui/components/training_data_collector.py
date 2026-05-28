@@ -72,9 +72,7 @@ class TrainingDataCollector(QWidget):
         conteo_layout.setContentsMargins(8, 6, 8, 6)
 
         self.training_counts_label = QLabel("Sin datos aún")
-        self.training_counts_label.setStyleSheet(
-            "color: #aaaaaa; font-size: 10px; font-family: monospace;"
-        )
+        self.training_counts_label.setObjectName("wm-training-counts")
         self.training_counts_label.setWordWrap(True)
         conteo_layout.addWidget(self.training_counts_label)
 

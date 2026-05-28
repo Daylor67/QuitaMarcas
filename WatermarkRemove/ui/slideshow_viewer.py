@@ -173,11 +173,13 @@ class SlideshowViewer(QDialog):
         btn_row.setSpacing(5)
 
         self.finish_btn = QPushButton("Finalizar y Procesar")
+        self.finish_btn.setObjectName("wm-finish-btn")
         self.finish_btn.clicked.connect(self._finish_review)
         self.finish_btn.setMaximumHeight(40)
         btn_row.addWidget(self.finish_btn)
 
         self.cancel_btn = QPushButton("Cancelar")
+        self.cancel_btn.setObjectName("wm-cancel-btn")
         self.cancel_btn.clicked.connect(self._cancel_review)
         self.cancel_btn.setMaximumHeight(40)
         btn_row.addWidget(self.cancel_btn)
