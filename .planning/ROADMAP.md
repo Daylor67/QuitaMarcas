@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: JSON Persistence** - Unificar SettingsHandler y UtilJson en un único servicio de persistencia (completed 2026-05-26)
 - [ ] **Phase 2: SlideshowViewer Decomposition** - Descomponer el God Class en componentes de responsabilidad única
 - [x] **Phase 3: Logic/Widget Separation** - Separar lógica de negocio de widgets y convertir WatermarkTab en coordinador puro (completed 2026-05-28)
-- [ ] **Phase 4: Visual Polish** - Rebalancear layout, reorganizar controles y aplicar estilo consistente con SmartStitch
+- [x] **Phase 4: Visual Polish** - Rebalancear layout, reorganizar controles y aplicar estilo consistente con SmartStitch (completed 2026-05-28)
 
 ## Phase Details
 
@@ -104,7 +104,7 @@ Plans:
 - [x] 04-02-PLAN.md — Reorganizar controles (Grupo Nav + QButtonGroup + QStackedWidget + Training Data)
 
 **Wave 3** *(blocked on Wave 2)*
-- [ ] 04-03-PLAN.md — Aplicar QSS vía gui/stylesheet.py — eliminar inline styles + WM_STYLE_SHEET
+- [x] 04-03-PLAN.md — Aplicar QSS vía gui/stylesheet.py — eliminar inline styles + WM_STYLE_SHEET
 
 **UI hint**: yes
 
@@ -118,4 +118,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. JSON Persistence | 2/2 | Complete    | 2026-05-26 |
 | 2. SlideshowViewer Decomposition | 3/3 | Complete    | 2026-05-27 |
 | 3. Logic/Widget Separation | 3/3 | Complete    | 2026-05-28 |
-| 4. Visual Polish | 2/3 | In Progress|  |
+| 4. Visual Polish | 3/3 | Complete   | 2026-05-28 |
