@@ -18,6 +18,7 @@ if parent_dir not in sys.path:
 
 from .image_viewer import ImageViewer
 from .position_editor import PositionEditor
+from WatermarkRemove.services import context_menu_service
 
 
 class WatermarkTab(QWidget):
@@ -143,40 +144,27 @@ class WatermarkTab(QWidget):
         except Exception as e:
             self.log(f"Error al abrir editor: {str(e)}")
 
-    def _is_context_menu_registered(self):
-        """Comprueba si el menú contextual está registrado en el registro de Windows."""
-        try:
-            import winreg
-            winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\Directory\shell\SmartStitchWR")
-            return True
-        except FileNotFoundError:
-            return False
-
     def _update_context_menu_btn(self):
-        """Actualiza el texto del botón según el estado actual."""
-        if self._is_context_menu_registered():
+        """Actualiza el texto del botón según el estado actual (presentación pura — delega la consulta de estado al servicio)."""
+        if context_menu_service.is_registered():
             self.context_menu_btn.setText("📂 Desregistrar menú contextual")
         else:
             self.context_menu_btn.setText("📂 Registrar menú contextual")
 
     def _toggle_context_menu(self):
-        """Registra o desregistra el menú contextual de carpetas."""
+        """Registra o desregistra el menú contextual de carpetas (coordinador: delega el toggle al servicio y refleja el resultado en la UI)."""
+        from PySide6.QtWidgets import QMessageBox
         try:
-            import register_context_menu
-            from PySide6.QtWidgets import QMessageBox
-
-            if self._is_context_menu_registered():
-                register_context_menu.unregister()
-                QMessageBox.information(self, "Menú contextual", "Menú contextual eliminado correctamente.")
-            else:
-                register_context_menu.register()
+            now_registered = context_menu_service.toggle()
+            if now_registered:
                 QMessageBox.information(self, "Menú contextual",
                     "Menú contextual registrado.\n"
                     "Ahora puedes hacer clic derecho en cualquier carpeta y seleccionar 'Abrir con SmartStitch WR'.")
+            else:
+                QMessageBox.information(self, "Menú contextual", "Menú contextual eliminado correctamente.")
 
             self._update_context_menu_btn()
         except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Error", f"No se pudo modificar el menú contextual:\n{e}")
 
     def _check_for_updates(self):
@@ -240,6 +228,11 @@ class WatermarkTab(QWidget):
         """
         if 'run_quita_marcas' in settings:
             self.run_quita_marcas.setChecked(settings['run_quita_marcas'])
+
+    # Alias de contrato (CLAUDE.md / ROADMAP declaran `apply_settings`).
+    # El método real es `set_settings`; el alias cumple la constraint literal
+    # sin romper compatibilidad con cualquier caller histórico.
+    apply_settings = set_settings
 
 
 # Para pruebas independientes
