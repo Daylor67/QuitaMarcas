@@ -449,7 +449,11 @@ class PositionEditor(QDialog):
 
         image_path = self.image_files[self.current_image_index]
         # Carga delegada al servicio (preserva np.fromfile / paths non-ASCII).
-        self.current_image = self.service.load_image(image_path)
+        try:
+            self.current_image = self.service.load_image(image_path)
+        except (ValueError, OSError) as e:
+            self.current_image = None
+            self.image_label.setText(f"Error cargando imagen: {e}")
 
     def _load_current_watermark(self):
         """Carga la marca de agua seleccionada en el ComboBox"""
@@ -459,8 +463,13 @@ class PositionEditor(QDialog):
         watermark_index = self.watermark_combo.currentIndex()
         watermark_path = self.watermark_files[watermark_index]
         # Carga delegada al servicio (preserva np.fromfile / paths non-ASCII).
-        self.current_watermark = self.service.load_image(watermark_path)
-        self.watermark_path = watermark_path
+        try:
+            self.current_watermark = self.service.load_image(watermark_path)
+            self.watermark_path = watermark_path
+        except (ValueError, OSError) as e:
+            self.current_watermark = None
+            self.watermark_path = None
+            self.image_label.setText(f"Error cargando marca: {e}")
 
     def _on_watermark_changed(self, index):
         """Callback cuando cambia la marca individual seleccionada"""
