@@ -101,7 +101,7 @@ Plans:
 - [x] 04-01-PLAN.md — Rebalancear layout (QSplitter 65/35 + persistencia de splitter sizes)
 
 **Wave 2** *(blocked on Wave 1)*
-- [ ] 04-02-PLAN.md — Reorganizar controles (Grupo Nav + QButtonGroup + QStackedWidget + Training Data)
+- [x] 04-02-PLAN.md — Reorganizar controles (Grupo Nav + QButtonGroup + QStackedWidget + Training Data)
 
 **Wave 3** *(blocked on Wave 2)*
 - [ ] 04-03-PLAN.md — Aplicar QSS vía gui/stylesheet.py — eliminar inline styles + WM_STYLE_SHEET
@@ -118,4 +118,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. JSON Persistence | 2/2 | Complete    | 2026-05-26 |
 | 2. SlideshowViewer Decomposition | 3/3 | Complete    | 2026-05-27 |
 | 3. Logic/Widget Separation | 3/3 | Complete    | 2026-05-28 |
-| 4. Visual Polish | 1/3 | In Progress|  |
+| 4. Visual Polish | 2/3 | In Progress|  |
