@@ -131,6 +131,11 @@ class SlideshowViewer(QDialog):
         self.processor.auto_accept_next_btn.clicked.connect(self.navigation.request_next)
         # B-fix: click izquierdo en overlay rojo → avanzar a siguiente imagen
         self.processor.auto_advance_requested.connect(self.navigation.request_next)
+        # Modelo de selección diferida: el processor aplica posiciones acumuladas
+        # (clicks derechos) antes de que navigation copie/avance.
+        self.navigation.pre_advance_flush.connect(
+            self.processor._flush_pending_removals_for_current_image
+        )
 
     def _setup_ui(self):
         """Layout principal: QSplitter horizontal (65% visor / 35% controles).

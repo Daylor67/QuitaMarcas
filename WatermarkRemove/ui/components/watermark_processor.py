@@ -902,81 +902,118 @@ class WatermarkProcessor(QWidget):
             self._processed_positions_by_image[str(self._current_file)] = positions_set or set()
 
     def _process_watermark_at_position(self, pos_name: str, rect_data: dict, is_cumulative: bool = False):
-        """Procesa la marca de agua en la posicion especificada.
+        """Toggle de posición seleccionada para remoción diferida.
 
-        Click izquierdo (no cumulative): reemplaza procesamiento anterior, avanza automaticamente.
-        Click derecho (cumulative): procesamiento acumulativo, NO avanza.
+        Click derecho (cumulative=True): TOGGLE — agrega si no estaba en el set,
+            la quita si ya estaba (verde ↔ rojo). NO remueve la marca todavía.
+        Click izquierdo (cumulative=False): REEMPLAZA el set con sólo esta posición
+            y dispara `auto_advance_requested`. La remoción la ejecuta el flush
+            de navigation.request_next (via pre_advance_flush).
+
+        La remoción real ocurre en `_flush_pending_removals_for_current_image` —
+        un único batch que aplica todas las posiciones marcadas y guarda el
+        resultado en output_folder.
         """
-        if self._output_folder is None or self._current_file is None:
+        if self._current_file is None:
+            return
+
+        file_key = str(self._current_file)
+        selected = self._processed_positions_by_image.setdefault(file_key, set())
+
+        if is_cumulative:
+            if pos_name in selected:
+                selected.discard(pos_name)
+                self._log(f"☐ Deseleccionado: {pos_name}")
+            else:
+                selected.add(pos_name)
+                self._log(f"☑ Seleccionado: {pos_name}")
+            self.request_redraw.emit()
+        else:
+            # Click izquierdo = reemplazar selección con esta única posición y avanzar.
+            selected.clear()
+            selected.add(pos_name)
+            self.auto_advance_requested.emit()
+
+    def _flush_pending_removals_for_current_image(self):
+        """Aplica en batch todas las posiciones marcadas para la imagen actual.
+
+        Conectado a `navigation.pre_advance_flush` — se ejecuta al inicio de
+        `request_next`. Carga la imagen original, aplica `remove_watermark` por
+        cada posición en el set, guarda en output_folder y emite `image_processed`
+        por cada posición (collector guarda training data por mark).
+
+        Idempotente: si el usuario vuelve a una imagen ya procesada y vuelve a
+        avanzar, re-aplicar desde la fuente da el mismo resultado.
+        """
+        if self._current_file is None:
+            return
+        file_key = str(self._current_file)
+        positions = self._processed_positions_by_image.get(file_key, set())
+        if not positions:
+            return
+
+        if self._output_folder is None:
             self.output_folder_request.emit()
             if self._output_folder is None:
                 return
 
+        current_watermark_index = self.watermark_combo.currentIndex()
+        if current_watermark_index < 0 or not self.watermark_files:
+            return
+
+        watermark_file = self.watermark_files[current_watermark_index]
+        watermark = load_images_cv2(watermark_file)
+        if watermark is None:
+            self._log(f"❌ Error cargando marca: {watermark_file.name}")
+            return
+
+        current_file = self._current_file
+        original = load_images_cv2(current_file)
+        if original is None:
+            self._log(f"❌ Error cargando imagen: {current_file.name}")
+            return
+
+        result = original
+        applied = 0
+        for pos_name in positions:
+            rect_data = self.watermark_rectangles.get(pos_name)
+            if rect_data is None:
+                continue
+            try:
+                base_before = result
+                x, y = align_watermark(
+                    result, watermark,
+                    offset_x=rect_data['offset_x'],
+                    offset_y=rect_data['offset_y'],
+                    side_x=rect_data['side_x'],
+                    side_y=rect_data['side_y'],
+                )
+                result = remove_watermark(
+                    result, watermark, x, y,
+                    alpha_adjust=self.alpha_adjust.value(),
+                )
+                self.image_processed.emit(
+                    current_file, result, x, y,
+                    watermark, watermark_file,
+                    self.watermark_folder.name if self.watermark_folder else '',
+                    base_before,
+                )
+                applied += 1
+            except Exception as e:
+                self._log(f"⚠️ Error aplicando {pos_name}: {e}")
+
+        if applied == 0:
+            return
+
         try:
-            current_file = self._current_file
-            current_watermark_index = self.watermark_combo.currentIndex()
-            if current_watermark_index < 0 or not self.watermark_files:
-                return
-
-            output_path = self._output_folder / current_file.name
-            file_key = str(self._current_file)
-
-            if is_cumulative and output_path.exists():
-                image = load_images_cv2(output_path)
-            else:
-                image = load_images_cv2(current_file)
-                if not is_cumulative:
-                    # Click izquierdo = reemplazar: esta visita empieza desde cero para esta imagen.
-                    self._processed_positions_by_image[file_key] = set()
-
-            if image is None:
-                self._log(f"❌ Error cargando imagen: {current_file.name}")
-                return
-            watermark_file = self.watermark_files[current_watermark_index]
-            watermark = load_images_cv2(watermark_file)
-            if watermark is None:
-                self._log(f"❌ Error cargando marca de agua: {watermark_file.name}")
-                return
-
-            x, y = align_watermark(
-                image,
-                watermark,
-                offset_x=rect_data['offset_x'],
-                offset_y=rect_data['offset_y'],
-                side_x=rect_data['side_x'],
-                side_y=rect_data['side_y']
-            )
-
-            result_image = remove_watermark(image, watermark, x, y, alpha_adjust=self.alpha_adjust.value())
-
-            guardar(current_file, result_image, self._output_folder)
-
-            # Actualizar working_image local y emitir image_processed
-            self._working_image = result_image
-            # Marcar esta posicion como procesada para esta imagen
-            self._processed_positions_by_image.setdefault(file_key, set()).add(pos_name)
-
-            # Emitir image_processed con contexto completo (collector recibe training data)
-            self.image_processed.emit(
-                current_file,
-                result_image,
-                x,
-                y,
-                watermark,
-                watermark_file,
-                self.watermark_folder.name if self.watermark_folder else '',
-                image,  # base image para training (la imagen pre-remocion)
-            )
-
-            self.request_redraw.emit()
-            self._log(f"✅ Marca de agua removida: {pos_name} en {current_file.name}")
-
-            # Click izquierdo: avanzar automaticamente (B-02 UAT fix).
-            if not is_cumulative:
-                self.auto_advance_requested.emit()
-
+            guardar(current_file, result, self._output_folder)
         except Exception as e:
-            self._log(f"❌ Error procesando marca de agua: {e}")
+            self._log(f"❌ Error guardando: {e}")
+            return
+
+        self._working_image = result
+        self.counts_changed.emit()
+        self._log(f"✅ {applied} marca(s) removida(s) en {current_file.name}")
 
     # ===================================================================
     # Modo manual (preview en vivo + accept/revert con maquina de eventos atomicos)

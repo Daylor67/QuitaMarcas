@@ -63,6 +63,9 @@ class NavigationController(QWidget):
     mouse_moved = Signal(object)
     # output_folder_request: el processor pide a navigation que cree output_folder
     output_folder_request = Signal()
+    # pre_advance_flush: emitida al inicio de request_next para que el processor aplique
+    # las posiciones acumuladas (click derecho) antes de que la navegación copie/avance.
+    pre_advance_flush = Signal()
 
     SUPPORTED_FORMATS = ('.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.tga', '.psd', '.psb', '.jfif')
 
@@ -459,6 +462,10 @@ class NavigationController(QWidget):
         Si current_index == len-1, emite `finish_requested` para que el composer
         muestre el dialogo de fin (no llama _finish_review directamente).
         """
+        # Pedirle al processor que aplique posiciones acumuladas (modelo de
+        # selección diferida: click derecho marca, Siguiente confirma).
+        self.pre_advance_flush.emit()
+
         # Limpiar memoria de eventos de la imagen actual
         self._clear_image_memory()
 
