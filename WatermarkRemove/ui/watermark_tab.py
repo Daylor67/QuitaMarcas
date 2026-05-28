@@ -146,6 +146,10 @@ class WatermarkTab(QWidget):
 
     def _update_context_menu_btn(self):
         """Actualiza el texto del botón según el estado actual (presentación pura — delega la consulta de estado al servicio)."""
+        import sys as _sys
+        if _sys.platform != "win32":
+            self.context_menu_btn.setVisible(False)
+            return
         if context_menu_service.is_registered():
             self.context_menu_btn.setText("📂 Desregistrar menú contextual")
         else:
@@ -153,7 +157,11 @@ class WatermarkTab(QWidget):
 
     def _toggle_context_menu(self):
         """Registra o desregistra el menú contextual de carpetas (coordinador: delega el toggle al servicio y refleja el resultado en la UI)."""
+        import sys as _sys
         from PySide6.QtWidgets import QMessageBox
+        if _sys.platform != "win32":
+            QMessageBox.warning(self, "No disponible", "El menú contextual solo está disponible en Windows.")
+            return
         try:
             now_registered = context_menu_service.toggle()
             if now_registered:
