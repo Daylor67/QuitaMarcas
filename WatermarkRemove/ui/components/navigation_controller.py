@@ -298,6 +298,11 @@ class NavigationController(QWidget):
         else:
             self.current_pixmap = QPixmap(str(current_file))
 
+        # Notificar al processor ANTES del render: su decorator (overlays rojo/verde)
+        # depende de _current_file. Si _apply_zoom corre primero, el decorator usa el
+        # path de la imagen anterior y dibuja el set de overlays equivocado.
+        self.image_changed.emit(self.current_index, current_file, self.working_image)
+
         if not self.current_pixmap.isNull():
             self._apply_zoom()
             width = self.current_pixmap.width()
@@ -313,10 +318,6 @@ class NavigationController(QWidget):
         # Estado de botones prev/next
         self.prev_btn.setEnabled(self.current_index > 0)
         self.next_btn.setEnabled(self.current_index < len(self.image_files) - 1)
-
-        # Notificar al composer/processor que cambio la imagen
-        self.image_changed.emit(self.current_index, current_file, self.working_image)
-        # Auto-detection se gatilla desde WatermarkProcessor via slot on_image_changed (Plan 02)
 
     def _apply_zoom(self):
         """Aplica el nivel de zoom actual a la imagen.

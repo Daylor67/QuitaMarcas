@@ -82,7 +82,13 @@ class SlideshowViewer(QDialog):
             current_file,
             self.navigation.working_image,
         )
-        if self.navigation.output_folder is not None:
+        # output_folder fue solicitado durante WatermarkProcessor.__init__ (via
+        # _on_watermark_folder_changed) pero el slot _create_output_folder aún no
+        # estaba conectado. Re-emitir ahora para que _save_current_image_as_is
+        # funcione desde la primera "siguiente" sin requerir procesar una marca antes.
+        if self.navigation.output_folder is None:
+            self.processor.output_folder_request.emit()
+        else:
             self.navigation.output_folder_ready.emit(self.navigation.output_folder)
         # A-fix: forzar redibujado con decorator ya registrado para que aparezcan los overlays
         self.processor.request_redraw.emit()
