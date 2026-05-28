@@ -10,9 +10,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QSlider, QSpinBox, QCheckBox
 )
 from PySide6.QtCore import Qt, Signal, QEvent
-from PySide6.QtGui import QPixmap, QKeyEvent, QImage, QWheelEvent
-import numpy as np
-import cv2
+from PySide6.QtGui import QPixmap, QKeyEvent, QWheelEvent
 
 # Agregar el directorio raíz al path
 current_dir = os.path.abspath(os.path.dirname(__file__))
@@ -20,9 +18,13 @@ parent_dir = os.path.dirname(os.path.dirname(current_dir))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-from utils import UtilJson
-from WatermarkRemove import load_images_cv2, align_watermark, remove_watermark
-from natsort import natsorted
+from WatermarkRemove.services import (
+    position_editor_service,
+    wm_positions_persistence,
+    scan_images,
+    scan_pngs,
+    scan_subfolders,
+)
 
 class ZoomableImageLabel(QLabel):
     """Label que soporta zoom con scroll del mouse"""
@@ -81,6 +83,9 @@ class PositionEditor(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+
+        # Servicio de dominio (delegación ARCH-02): load_image + build_preview_pixmap.
+        self.service = position_editor_service
 
         # Datos
         self.images_folder = None
@@ -378,9 +383,8 @@ class PositionEditor(QDialog):
         if not self.marcas_base_path.exists():
             return
 
-        # Obtener subcarpetas ordenadas (más recientes primero)
-        folders = [f for f in self.marcas_base_path.iterdir() if f.is_dir()]
-        folders.sort(reverse=True)
+        # Obtener subcarpetas (orden reverse: más recientes primero) — delegado al servicio.
+        folders = scan_subfolders(self.marcas_base_path)
 
         # Agregar al combo: label = nombre, data = ruta completa
         for folder in folders:
@@ -403,10 +407,8 @@ class PositionEditor(QDialog):
         if not self.images_folder or not self.images_folder.exists():
             return
 
-        self.image_files = []
-        for file in natsorted(self.images_folder.iterdir()):
-            if file.is_file() and file.suffix.lower() in self.SUPPORTED_FORMATS:
-                self.image_files.append(file)
+        # Escaneo + filtro de extensiones delegado al servicio (ARCH-02).
+        self.image_files = scan_images(self.images_folder, self.SUPPORTED_FORMATS)
 
         self.current_image_index = 0
         self._update_counter()
@@ -419,12 +421,11 @@ class PositionEditor(QDialog):
         if not self.watermarks_folder or not self.watermarks_folder.exists():
             return
 
-        # Cargar todos los archivos PNG de la carpeta
-        for file in natsorted(self.watermarks_folder.iterdir()):
-            if file.is_file() and file.suffix.lower() == '.png':
-                self.watermark_files.append(file)
-                # Agregar al ComboBox: nombre del archivo como label, ruta como data
-                self.watermark_combo.addItem(file.name, str(file))
+        # Escaneo de .png delegado al servicio (ARCH-02).
+        self.watermark_files = scan_pngs(self.watermarks_folder)
+        for file in self.watermark_files:
+            # Agregar al ComboBox: nombre del archivo como label, ruta como data
+            self.watermark_combo.addItem(file.name, str(file))
 
     def _check_ready(self):
         """Verifica si está listo para editar"""
@@ -447,7 +448,8 @@ class PositionEditor(QDialog):
             return
 
         image_path = self.image_files[self.current_image_index]
-        self.current_image = load_images_cv2(str(image_path))
+        # Carga delegada al servicio (preserva np.fromfile / paths non-ASCII).
+        self.current_image = self.service.load_image(image_path)
 
     def _load_current_watermark(self):
         """Carga la marca de agua seleccionada en el ComboBox"""
@@ -456,7 +458,8 @@ class PositionEditor(QDialog):
 
         watermark_index = self.watermark_combo.currentIndex()
         watermark_path = self.watermark_files[watermark_index]
-        self.current_watermark = load_images_cv2(str(watermark_path))
+        # Carga delegada al servicio (preserva np.fromfile / paths non-ASCII).
+        self.current_watermark = self.service.load_image(watermark_path)
         self.watermark_path = watermark_path
 
     def _on_watermark_changed(self, index):
@@ -477,30 +480,21 @@ class PositionEditor(QDialog):
             return
 
         try:
-            # Hacer copia
-            img_copy = self.current_image.copy()
-
-            # Calcular coordenadas y aplicar remove_watermark
-            x, y = align_watermark(
-                img_copy, self.current_watermark,
-                offset_x=self.offset_x, offset_y=self.offset_y,
-                side_x=self.side_x, side_y=self.side_y
+            # Construcción del pixmap (align + remove + BGR->RGB + QImage) delegada al servicio.
+            pixmap = self.service.build_preview_pixmap(
+                self.current_image,
+                self.current_watermark,
+                offset_x=self.offset_x,
+                offset_y=self.offset_y,
+                side_x=self.side_x,
+                side_y=self.side_y,
             )
-
-            result_img = remove_watermark(img_copy, self.current_watermark, x, y)
-
-            # Convertir a RGB y QPixmap
-            result_rgb = cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB)
-            height, width, channel = result_rgb.shape
-            bytes_per_line = 3 * width
-            q_image = QImage(result_rgb.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
-            pixmap = QPixmap.fromImage(q_image)
 
             # Establecer imagen (el label maneja el zoom)
             self.image_label.set_image(pixmap)
 
             # Ajustar el tamaño de la ventana según la imagen
-            self._adjust_window_size(width, height)
+            self._adjust_window_size(pixmap.width(), pixmap.height())
 
         except Exception as e:
             self.image_label.setText(f"❌ Error: {str(e)}")
@@ -572,28 +566,15 @@ class PositionEditor(QDialog):
             return
 
         try:
-            watermark_folder_name = self.watermarks_folder.name
-            wm_dir = os.path.dirname(current_dir)
-            json_path = Path(wm_dir) / 'wm_positions.json'
-            json_file = UtilJson(json_path)
-
-            positions_dict = {f'pos_{i}': p for i, p in enumerate(self.saved_positions, start=1)}
-
-            # Preservar otras marcas/posiciones ya guardadas en la misma carpeta
-            folder_data = json_file.get(watermark_folder_name, {}) or {}
-
-            if self.save_by_watermark_checkbox.isChecked():
-                if not self.watermark_path:
-                    raise ValueError("No hay marca seleccionada para asociar las posiciones")
-                folder_data[self.watermark_path.name] = positions_dict
-                target_label = f"{watermark_folder_name} / {self.watermark_path.name}"
-            else:
-                # Modo carpeta (legacy): pos_X directos al folder
-                for k, v in positions_dict.items():
-                    folder_data[k] = v
-                target_label = watermark_folder_name
-
-            json_file.set(watermark_folder_name, folder_data)
+            # Persistencia anidada delegada al servicio (ARCH-02). Preserva la
+            # estructura folder->mark->pos_N (o folder->pos_N en modo legacy) y
+            # el parseo defensivo de claves existentes.
+            target_label = wm_positions_persistence.save_positions(
+                self.watermarks_folder.name,
+                self.saved_positions,
+                save_by_watermark=self.save_by_watermark_checkbox.isChecked(),
+                watermark_filename=(self.watermark_path.name if self.watermark_path else None),
+            )
             print(f"✓ Guardadas {len(self.saved_positions)} posiciones en '{target_label}'")
 
         except Exception as e:

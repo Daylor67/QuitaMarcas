@@ -10,12 +10,13 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QPixmap
-from natsort import natsorted
 # Agregar el directorio raíz al path
 current_dir = os.path.abspath(os.path.dirname(__file__))
 parent_dir = os.path.dirname(os.path.dirname(current_dir))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
+
+from WatermarkRemove.services import scan_images
 
 
 class ImageViewer(QDialog):
@@ -89,15 +90,16 @@ class ImageViewer(QDialog):
         # Limpiar grid anterior
         self._clear_grid()
 
-        # Buscar todas las imágenes
-        image_files = []
+        # Si es un archivo, usar su directorio padre (preserva path_label).
+        # NOTE: scan_images también re-baja a parent internamente, pero el
+        # widget DEBE reasignar self.folder_path para que path_label refleje
+        # la carpeta real (no el archivo).
         if self.folder_path.is_file():
-            # Si es un archivo, usar su directorio padre
             self.folder_path = self.folder_path.parent
 
-        for file in natsorted(self.folder_path.iterdir()):
-            if file.is_file() and file.suffix.lower() in self.SUPPORTED_FORMATS:
-                image_files.append(file)
+        # Escaneo + filtro de extensiones delegado al servicio (ARCH-02).
+        # Pasa SUPPORTED_FORMATS local (incluye .psd/.psb — NO unificado).
+        image_files = scan_images(self.folder_path, self.SUPPORTED_FORMATS)
 
         # Actualizar contador
         self.image_count_label.setText(f"{len(image_files)} imagen{'es' if len(image_files) != 1 else ''}")
