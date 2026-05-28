@@ -84,6 +84,8 @@ class SlideshowViewer(QDialog):
         )
         if self.navigation.output_folder is not None:
             self.navigation.output_folder_ready.emit(self.navigation.output_folder)
+        # A-fix: forzar redibujado con decorator ya registrado para que aparezcan los overlays
+        self.processor.request_redraw.emit()
 
     def _wire_signals(self):
         """Conecta signals processor↔navigation y composer↔components."""
@@ -121,6 +123,8 @@ class SlideshowViewer(QDialog):
 
         # --- "Guardar y Siguiente" gatilla request_next (replica patron original) ---
         self.processor.auto_accept_next_btn.clicked.connect(self.navigation.request_next)
+        # B-fix: click izquierdo en overlay rojo → avanzar a siguiente imagen
+        self.processor.auto_advance_requested.connect(self.navigation.request_next)
 
     def _setup_ui(self):
         """Layout principal: QSplitter horizontal (65% visor / 35% controles).

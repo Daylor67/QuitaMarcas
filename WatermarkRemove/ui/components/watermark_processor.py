@@ -79,6 +79,7 @@ class WatermarkProcessor(QWidget):
     # image_processed: (file_path, working_image, x, y, watermark_array, watermark_path, watermark_folder_name, base_image)
     image_processed = Signal(object, object, int, int, object, object, str, object)
     image_reset = Signal(object)                    # current_file_path
+    auto_advance_requested = Signal()               # click izquierdo en overlay → pedir avance al siguiente
     processing_blocked = Signal(bool)               # True=bloquear navegacion durante preview activo
     request_redraw = Signal()                       # re-render del navigation panel
     output_folder_request = Signal()                # pedir a navigation que cree output_folder
@@ -967,16 +968,9 @@ class WatermarkProcessor(QWidget):
             self.request_redraw.emit()
             self._log(f"✅ Marca de agua removida: {pos_name} en {current_file.name}")
 
-            # Click izquierdo: avanzar automaticamente. Esto se hace pidiendo a navigation.
+            # Click izquierdo: avanzar automaticamente (B-02 UAT fix).
             if not is_cumulative:
-                # request_redraw es suficiente — el composer puede wire un signal adicional
-                # si quiere avance. Por simplicidad, replicamos directamente: emit signal
-                # `processing_blocked(False)` y la navigation puede llamar request_next.
-                # PERO: el patron original era `self._next_image()` inmediato.
-                # Solucion limpia: emit `auto_advance_requested` signal.
-                # Para minimizar nuevas senales, reutilizamos `processing_blocked(False)` y
-                # delegamos al composer. El composer puede agregar la conexion explicita.
-                pass  # navigation no avanza automaticamente desde aqui — composer wire si quiere
+                self.auto_advance_requested.emit()
 
         except Exception as e:
             self._log(f"❌ Error procesando marca de agua: {e}")
@@ -1398,6 +1392,17 @@ class WatermarkProcessor(QWidget):
             wm_array = None
             if self.watermark_folder is not None:
                 png_path = resolve_png_for_class(self.watermark_folder, d['class_type'], w)
+                # E-fix: si la carpeta seleccionada no tiene el PNG, buscar en todas las carpetas
+                if png_path is None:
+                    wm_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+                    marcas_base = Path(wm_dir) / 'marcas'
+                    if marcas_base.exists():
+                        for folder in marcas_base.iterdir():
+                            if folder.is_dir() and folder != self.watermark_folder:
+                                candidate = resolve_png_for_class(folder, d['class_type'], w)
+                                if candidate is not None:
+                                    png_path = candidate
+                                    break
                 if png_path is not None:
                     try:
                         wm_array = load_images_cv2(png_path)
@@ -1620,11 +1625,18 @@ class WatermarkProcessor(QWidget):
             1 — Recorte: activa crop mode
             2 — Automático: activa auto detection YOLO
         """
+        # D-fix: al salir de Selección, desactivar modo avanzado (manual) si estaba activo
+        if mode_index in (1, 2) and self.manual_mode_enabled:
+            self.manual_mode_enabled = False
+            self.manual_tracking_requested.emit(False)
+            self.manual_overlay_visibility.emit(False)
+            self.opciones_avanzadas.blockSignals(True)
+            self.opciones_avanzadas.setChecked(False)
+            self.opciones_avanzadas.blockSignals(False)
+
         if mode_index == 0:
             # Desactivar modos especiales
-            if self.crop_mode_enabled:
-                self.crop_mode_enabled = False
-                self.request_redraw.emit()
+            self.crop_mode_enabled = False
             was_auto = self.auto_mode_enabled
             if self.auto_mode_enabled:
                 self.auto_mode_enabled = False
@@ -1634,7 +1646,8 @@ class WatermarkProcessor(QWidget):
                 self.auto_preview_image = None
                 self.detections_list.clear()
                 self.preview_changed.emit(None)
-                self.request_redraw.emit()
+            # C-fix: siempre redibujar al volver a Selección (restaura overlays rojos)
+            self.request_redraw.emit()
         elif mode_index == 1:
             # Activar modo recorte, desactivar auto
             was_auto = self.auto_mode_enabled
