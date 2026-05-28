@@ -71,7 +71,7 @@ class WmPositionsPersistenceService:
         # y otro dirname → WatermarkRemove/. Se preserva el patrón de doble
         # dirname desde __file__ para mantener simetría con el plan.
         self._json_path = (
-            Path(os.path.dirname(os.path.dirname(__file__))) / 'wm_positions.json'
+            Path(os.path.abspath(os.path.dirname(os.path.dirname(__file__)))) / 'wm_positions.json'
         )
 
     def save_positions(
