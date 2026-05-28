@@ -59,7 +59,29 @@ class SlideshowViewer(QDialog):
 
         # Wire signals ANTES de _setup_ui (callbacks iniciales necesitan el cableado), luego UI.
         self._wire_signals()
+        # Re-emitir estado inicial: NavigationController emitio image_changed en su __init__
+        # ANTES de que _wire_signals() conectara el slot del processor, asi que el processor
+        # nunca recibio la imagen inicial — _working_image quedaria None para siempre.
+        self._sync_initial_state()
         self._setup_ui()
+
+    def _sync_initial_state(self):
+        """Re-emite el estado inicial de navigation hacia processor/collector.
+
+        NavigationController emite image_changed en su __init__ (via _show_current_image),
+        pero en ese momento _wire_signals() aun no corrio — ningun slot estaba conectado.
+        Esto deja processor._working_image = None, rompiendo overlays, modo manual y auto YOLO.
+        """
+        if not self.navigation.image_files:
+            return
+        current_file = self.navigation.image_files[self.navigation.current_index]
+        self.navigation.image_changed.emit(
+            self.navigation.current_index,
+            current_file,
+            self.navigation.working_image,
+        )
+        if self.navigation.output_folder is not None:
+            self.navigation.output_folder_ready.emit(self.navigation.output_folder)
 
     def _wire_signals(self):
         """Conecta signals processor↔navigation y composer↔components."""
