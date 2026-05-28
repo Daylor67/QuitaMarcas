@@ -76,6 +76,10 @@ def scan_subfolders(base: Path) -> list[Path]:
 
     Returns:
         Lista de Paths de subdirectorios, ordenada en reverse.
+
+    Raises:
+        PermissionError: si el sistema no permite listar el directorio.
+        OSError: si el path no es accesible.
     """
     folders = [f for f in base.iterdir() if f.is_dir()]
     folders.sort(reverse=True)

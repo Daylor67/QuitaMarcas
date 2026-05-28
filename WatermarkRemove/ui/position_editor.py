@@ -381,7 +381,11 @@ class PositionEditor(QDialog):
             return
 
         # Obtener subcarpetas (orden reverse: más recientes primero) — delegado al servicio.
-        folders = scan_subfolders(self.marcas_base_path)
+        try:
+            folders = scan_subfolders(self.marcas_base_path)
+        except OSError as e:
+            self.watermark_folder_combo.addItem(f"Error al leer carpeta: {e}")
+            return
 
         # Agregar al combo: label = nombre, data = ruta completa
         for folder in folders:
