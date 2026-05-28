@@ -2,15 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-last_updated: "2026-05-28T02:10:13.620Z"
+status: ready_to_plan
+last_updated: 2026-05-28T03:12:26.808Z
 last_activity: 2026-05-28 -- Phase 03 execution started
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 8
-  completed_plans: 5
+  completed_plans: 8
   percent: 50
+stopped_at: Phase 03 complete (3/3) — ready to discuss Phase 4
 ---
 
 # Project State
@@ -20,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-26)
 
 **Core value:** El usuario puede revisar, remover marcas de agua y navegar imágenes sin que la UI se interponga — flujo fluido, controles claros, sin sorpresas.
-**Current focus:** Phase 03 — logic-widget-separation
+**Current focus:** Phase 4 — visual polish
 
 ## Current Position
 
-Phase: 03 (logic-widget-separation) — EXECUTING
-Plan: 1 of 3
-Status: Executing Phase 03
-Last activity: 2026-05-28 -- Phase 03 execution started
+Phase: 4
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-05-28
 
 Progress: [█████░░░░░] 50%
 
@@ -35,7 +36,7 @@ Progress: [█████░░░░░] 50%
 
 **Velocity:**
 
-- Total plans completed: 2
+- Total plans completed: 5
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -44,6 +45,7 @@ Progress: [█████░░░░░] 50%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 1 | 2 | - | - |
+| 03 | 3 | - | - |
 
 **Recent Trend:**
 

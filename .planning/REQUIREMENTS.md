@@ -8,9 +8,9 @@
 ### Architecture
 
 - [ ] **ARCH-01**: El módulo `WatermarkRemove/` no tiene un God Class — `SlideshowViewer` se descompone en componentes con responsabilidad única (navegación, procesamiento de watermarks, colección de training data)
-- [ ] **ARCH-02**: La lógica de negocio de `WatermarkRemove` está separada de los widgets UI — los widgets solo coordinan y presentan, no ejecutan lógica de dominio
+- [x] **ARCH-02**: La lógica de negocio de `WatermarkRemove` está separada de los widgets UI — los widgets solo coordinan y presentan, no ejecutan lógica de dominio
 - [x] **ARCH-03**: `SettingsHandler` y `UtilJson` están unificados en un único servicio de persistencia JSON — no hay duplicación de responsabilidad
-- [ ] **ARCH-04**: `WatermarkTab` actúa como coordinador puro — no contiene lógica de negocio inline, solo conecta UI con servicios
+- [x] **ARCH-04**: `WatermarkTab` actúa como coordinador puro — no contiene lógica de negocio inline, solo conecta UI con servicios
 
 ### UI/UX
 
@@ -47,8 +47,8 @@
 |-------------|-------|--------|
 | ARCH-03 | Phase 1 — JSON Persistence | Complete |
 | ARCH-01 | Phase 2 — SlideshowViewer Decomposition | Pending |
-| ARCH-02 | Phase 3 — Logic/Widget Separation | Pending |
-| ARCH-04 | Phase 3 — Logic/Widget Separation | Pending |
+| ARCH-02 | Phase 3 — Logic/Widget Separation | Complete |
+| ARCH-04 | Phase 3 — Logic/Widget Separation | Complete |
 | UI-01 | Phase 4 — Visual Polish | Pending |
 | UI-02 | Phase 4 — Visual Polish | Pending |
 | UI-03 | Phase 4 — Visual Polish | Pending |

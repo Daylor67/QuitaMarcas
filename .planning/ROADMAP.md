@@ -111,5 +111,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. JSON Persistence | 2/2 | Complete    | 2026-05-26 |
 | 2. SlideshowViewer Decomposition | 3/3 | Complete    | 2026-05-27 |
-| 3. Logic/Widget Separation | 3/3 | Complete   | 2026-05-28 |
+| 3. Logic/Widget Separation | 3/3 | Complete    | 2026-05-28 |
 | 4. Visual Polish | 0/3 | Not started | - |
