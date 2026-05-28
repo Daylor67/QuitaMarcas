@@ -73,11 +73,16 @@ Plans:
   2. Ningún widget en `WatermarkRemove/ui/` contiene lógica de negocio inline — solo llamadas a servicios extraídos
   3. WatermarkTab no orquesta lógica directamente: conecta señales de UI con servicios, sin condicionales de dominio propios
   4. El flujo completo (abrir imágenes → detectar/remover watermark → guardar) sigue funcionando sin regresión
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 03-01: Extraer lógica de negocio residual de widgets (position_editor, image_viewer)
-- [ ] 03-02: Refactorizar WatermarkTab como coordinador puro — conectar servicios con señales UI
+
+**Wave 1**
+- [ ] 03-01-PLAN.md — Crear servicios de dominio (PositionEditorService, folder_scan, wm_positions persistence, ContextMenuService) + barrel + artefactos Wave 0 (UAT + grep pattern)
+
+**Wave 2** *(blocked on Wave 1)*
+- [ ] 03-02-PLAN.md — Refactorizar position_editor.py e image_viewer.py para delegar dominio a servicios (ARCH-02)
+- [ ] 03-03-PLAN.md — Refactorizar watermark_tab.py como coordinador puro (winreg → ContextMenuService, alias apply_settings) + UAT manual final (ARCH-04)
 
 ### Phase 4: Visual Polish
 **Goal**: La interfaz de WatermarkRemove es visualmente coherente con SmartStitch y el visor de imagen domina el espacio disponible
@@ -106,5 +111,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. JSON Persistence | 2/2 | Complete    | 2026-05-26 |
 | 2. SlideshowViewer Decomposition | 3/3 | Complete    | 2026-05-27 |
-| 3. Logic/Widget Separation | 0/2 | Not started | - |
+| 3. Logic/Widget Separation | 0/3 | Not started | - |
 | 4. Visual Polish | 0/3 | Not started | - |
