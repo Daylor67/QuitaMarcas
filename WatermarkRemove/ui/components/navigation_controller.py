@@ -141,18 +141,13 @@ class NavigationController(QWidget):
 
         info_layout.addWidget(QLabel("Imagen:"))
         self.counter_label = QLabel("0 / 0")
+        self.counter_label.setObjectName("wm-counter")
         self.counter_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        self.counter_label.setStyleSheet(
-            "font-size: 15px; font-weight: bold; color: #2196F3; padding: 5px;"
-        )
         info_layout.addWidget(self.counter_label)
 
         self.filename_label = QLabel("Sin archivo")
+        self.filename_label.setObjectName("wm-filename")
         self.filename_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.filename_label.setStyleSheet(
-            "font-size: 12px; color: #888; padding: 10px; "
-            "background-color: #1e1e1e; border-radius: 5px;"
-        )
         self.filename_label.setWordWrap(True)
         self.filename_label.setMaximumHeight(60)
         info_layout.addWidget(self.filename_label)
@@ -164,32 +159,25 @@ class NavigationController(QWidget):
 
         self.prev_btn = QPushButton("Anterior")
         self.prev_btn.clicked.connect(self.request_previous)
-        self.prev_btn.setStyleSheet(
-            "padding: 10px; font-size: 12px; background-color: #555; color: white;"
-        )
         self.prev_btn.setMaximumHeight(40)
         nav_buttons.addWidget(self.prev_btn)
 
         self.next_btn = QPushButton("Siguiente")
         self.next_btn.clicked.connect(self.request_next)
-        self.next_btn.setStyleSheet(
-            "padding: 10px; font-size: 12px; background-color: #4CAF50; "
-            "color: white; font-weight: bold;"
-        )
         self.next_btn.setMaximumHeight(40)
         nav_buttons.addWidget(self.next_btn)
         outer.addLayout(nav_buttons)
 
         # --- Scroll area con image_label ---
         scroll = QScrollArea()
+        scroll.setObjectName("wm-image-scroll")
         scroll.setWidgetResizable(False)  # Importante para que funcione el zoom
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setStyleSheet("border: 2px solid #444; background-color: #2b2b2b;")
 
         self.image_label = QLabel()
+        self.image_label.setObjectName("wm-image-label")
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_label.setStyleSheet("background-color: #2b2b2b;")
         scroll.setWidget(self.image_label)
 
         # Zoom overlay flotante
