@@ -36,3 +36,14 @@ class WmPersistenceService:
     def set_last_watermark_folder(self, folder_name: str) -> None:
         """Persiste el nombre de la carpeta de marcas seleccionada."""
         UtilJson(self._path).set('last_watermark_folder', folder_name)
+
+    def get_splitter_sizes(self, default: list) -> list:
+        """Retorna los tamaños del splitter desde wm_settings.json. Default si no existe."""
+        value = UtilJson(self._path).get('splitter_sizes', default)
+        if isinstance(value, list) and len(value) > 0:
+            return [int(v) for v in value]
+        return list(default)
+
+    def set_splitter_sizes(self, sizes: list) -> None:
+        """Persiste los tamaños del splitter en wm_settings.json."""
+        UtilJson(self._path).set('splitter_sizes', [int(v) for v in sizes])

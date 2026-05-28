@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QWidget,
-    QScrollArea, QGroupBox, QMessageBox,
+    QGroupBox, QMessageBox, QSplitter,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeyEvent
@@ -31,6 +31,7 @@ if _parent_dir not in sys.path:
 from WatermarkRemove.ui.components import (
     NavigationController, WatermarkProcessor, TrainingDataCollector,
 )
+from WatermarkRemove.services import wm_persistence
 
 
 class SlideshowViewer(QDialog):
@@ -121,63 +122,57 @@ class SlideshowViewer(QDialog):
         self.processor.auto_accept_next_btn.clicked.connect(self.navigation.request_next)
 
     def _setup_ui(self):
-        """Layout horizontal: panel de controles (izq, 280px) + navigation (der)."""
+        """Layout principal: QSplitter horizontal (65% visor / 35% controles).
+
+        Reemplaza el QHBoxLayout con ancho fijo de 280 px (Phase 4 — D-01, D-02).
+        La proporcion inicial es [315, 585] (35%/65% de 900 px iniciales).
+        """
         self.setWindowTitle("Revisión de Imágenes")
         self.setModal(True)
         self.resize(900, 650)
 
-        main_layout = QHBoxLayout(self)
-        main_layout.setSpacing(15)
-        main_layout.setContentsMargins(10, 10, 10, 10)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(10, 10, 10, 10)
+        outer.setSpacing(0)
 
-        main_layout.addWidget(self._create_controls_panel())
-        main_layout.addWidget(self.navigation, 1)
+        self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter.addWidget(self._create_controls_panel())
+        self._splitter.addWidget(self.navigation)
+        self._splitter.setSizes(wm_persistence.get_splitter_sizes([315, 585]))
+        self._splitter.splitterMoved.connect(self._on_splitter_moved)
+
+        outer.addWidget(self._splitter)
 
     def _on_navigation_resize_requested(self, width: int, height: int):
         """Slot: NavigationController solicita resize. Mantiene altura actual y ajusta ancho."""
         self.resize(width, self.height())
 
     def _create_controls_panel(self) -> QWidget:
-        """Panel de controles (izquierda, scroll vertical): WatermarkProcessor +
-        grupo Navegacion (finish/cancel) + TrainingDataCollector (conteo)."""
+        """Panel de controles (izquierda del splitter): WatermarkProcessor +
+        grupo Navegacion (finish/cancel) + TrainingDataCollector.
+
+        Sin scroll wrapper (D-03) y sin ancho fijo (D-01 — el splitter lo controla).
+        """
         panel = QWidget()
-        panel.setFixedWidth(self.controls_panel_width)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
-
-        content = QWidget()
-        layout = QVBoxLayout(content)
+        layout = QVBoxLayout(panel)
         layout.setSpacing(10)
         layout.setContentsMargins(0, 0, 6, 0)
-
-        scroll.setWidget(content)
-
-        outer = QVBoxLayout(panel)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
-        outer.addWidget(scroll)
 
         # === 1. WatermarkProcessor (sus GroupBoxes "Seleccion" + "Auto") ===
         layout.addWidget(self.processor)
 
-        # === 2. Grupo Navegacion (solo finish + cancel) ===
-        nav_group = QGroupBox("✳️ Navegación")
+        # === 2. Grupo Navegacion (finish + cancel) ===
+        nav_group = QGroupBox("Navegación")
         nav_action_layout = QHBoxLayout(nav_group)
         nav_action_layout.setSpacing(5)
 
         self.finish_btn = QPushButton("Finalizar y Procesar")
         self.finish_btn.clicked.connect(self._finish_review)
-        self.finish_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #2196F3; color: white; font-weight: bold;")
         self.finish_btn.setMaximumHeight(40)
         nav_action_layout.addWidget(self.finish_btn)
 
         self.cancel_btn = QPushButton("Cancelar")
         self.cancel_btn.clicked.connect(self._cancel_review)
-        self.cancel_btn.setStyleSheet("padding: 10px; font-size: 12px; background-color: #f44336; color: white;")
         self.cancel_btn.setMaximumHeight(40)
         nav_action_layout.addWidget(self.cancel_btn)
 
@@ -187,6 +182,15 @@ class SlideshowViewer(QDialog):
         layout.addWidget(self.collector)
         layout.addStretch(1)
         return panel
+
+    def _on_splitter_moved(self, pos: int, index: int):
+        """Slot: persiste los sizes del splitter al moverlo (D-02)."""
+        wm_persistence.set_splitter_sizes(list(self._splitter.sizes()))
+
+    def closeEvent(self, event):
+        """Persiste el tamaño del splitter al cerrar el diálogo (D-02)."""
+        wm_persistence.set_splitter_sizes(list(self._splitter.sizes()))
+        super().closeEvent(event)
 
     def _log(self, message: str):
         """Logger del composer (fallback a print)."""
