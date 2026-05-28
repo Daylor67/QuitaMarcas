@@ -215,8 +215,8 @@ class WatermarkProcessor(QWidget):
         self.crop_apply_btn.hide()
         seleccion_layout.addWidget(self.crop_apply_btn)
 
-        # Checkbox modo seleccion manual
-        self.opciones_avanzadas = QCheckBox("Modo selección manual")
+        # Checkbox modo seleccion manual (Phase 4 D-07: renombrado a "Avanzado")
+        self.opciones_avanzadas = QCheckBox("Avanzado")
         self.opciones_avanzadas.stateChanged.connect(self._toggle_manual_mode)
         seleccion_layout.addWidget(self.opciones_avanzadas)
 
@@ -379,6 +379,47 @@ class WatermarkProcessor(QWidget):
 
         self.auto_group.hide()
         outer.addWidget(self.auto_group)
+
+        # === Phase 4 (D-04, D-06): Crear paneles para QStackedWidget ===
+        # Los widgets ya existen (creados arriba). Crear contenedores QWidget
+        # que los wrappean para el QStackedWidget del slideshow_viewer.
+
+        # Panel Selección: wrappea el contenido de seleccion_group
+        self.panel_seleccion = self.seleccion_group
+
+        # Panel Recorte: mueve los widgets de crop desde seleccion_group a un panel separado.
+        # Al agregarlos a recorte_layout, Qt los reparentea fuera de seleccion_group.
+        # Los widgets quedan VISIBLES dentro de panel_recorte (el QStackedWidget controla
+        # qué panel muestra — NO se ocultan aquí).
+        self.panel_recorte = QWidget()
+        recorte_layout = QVBoxLayout(self.panel_recorte)
+        recorte_layout.setSpacing(5)
+        recorte_layout.setContentsMargins(5, 5, 5, 5)
+        recorte_layout.addWidget(QLabel("Píxeles a recortar:"))
+        recorte_layout.addWidget(self.crop_pixels_input)
+        recorte_layout.addWidget(self.crop_invert_checkbox)
+        recorte_layout.addWidget(self.crop_apply_btn)
+        recorte_layout.addStretch(1)
+        # Mostrar los widgets de crop en su panel (estaban ocultos por el checkbox flow anterior)
+        self.crop_pixels_input.show()
+        self.crop_invert_checkbox.show()
+        self.crop_apply_btn.show()
+        # IMPORTANTE: NO llamar .hide() sobre los widgets de crop aquí — ya viven en
+        # panel_recorte y deben estar visibles cuando ese panel es la página activa del stack.
+
+        # Panel Automático: wrappea auto_group
+        self.panel_auto = self.auto_group
+        self.panel_auto.show()  # auto_group.hide() fue llamado arriba; revertir para el stack
+
+        # Remover los paneles del outer layout de WatermarkProcessor (el QStackedWidget
+        # del slideshow_viewer los contendrá — WatermarkProcessor ya no es visible directamente)
+        outer.removeWidget(self.seleccion_group)
+        outer.removeWidget(self.auto_group)
+        # Remover también auto_mode_checkbox (el QButtonGroup en slideshow_viewer lo reemplaza)
+        outer.removeWidget(self.auto_mode_checkbox)
+        self.auto_mode_checkbox.hide()
+        # Ocultar crop_mode_checkbox (era el mecanismo anterior; el modo se cambia externamente)
+        self.crop_mode_checkbox.hide()
 
     # ===================================================================
     # Slots publicos (alimentados por NavigationController via composer wiring)
@@ -1564,3 +1605,42 @@ class WatermarkProcessor(QWidget):
             return result_pixmap
         except Exception:
             return pixmap
+
+    # ===================================================================
+    # Phase 4 (D-06): selector de modo externo (QButtonGroup en slideshow_viewer)
+    # ===================================================================
+    def set_mode(self, mode_index: int):
+        """Cambia el modo activo desde el selector externo (QButtonGroup en slideshow_viewer).
+
+        Phase 4 (D-06): reemplaza los checkboxes internos auto_mode_checkbox y
+        crop_mode_checkbox como mecanismo de cambio de modo. Los métodos internos
+        _toggle_auto_mode y _toggle_crop_mode se preservan para compatibilidad pero
+        ya no son invocados por checkboxes de UI (los checkboxes están ocultos).
+
+        mode_index:
+            0 — Selección: modo por defecto, muestra panel_seleccion
+            1 — Recorte: activa crop mode
+            2 — Automático: activa auto detection YOLO
+        """
+        if mode_index == 0:
+            # Desactivar modos especiales
+            if self.crop_mode_enabled:
+                self.crop_mode_enabled = False
+                self.request_redraw.emit()
+            if self.auto_mode_enabled:
+                self.auto_mode_enabled = False
+        elif mode_index == 1:
+            # Activar modo recorte, desactivar auto
+            if self.auto_mode_enabled:
+                self.auto_mode_enabled = False
+            self.crop_mode_enabled = True
+            self.request_redraw.emit()
+        elif mode_index == 2:
+            # Activar auto YOLO, desactivar crop
+            if self.crop_mode_enabled:
+                self.crop_mode_enabled = False
+            if not self.auto_mode_enabled:
+                self.auto_mode_enabled = True
+                # Correr detección automática si hay imagen disponible
+                if self._working_image is not None:
+                    self._run_auto_detection()
