@@ -7,7 +7,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QGroupBox, QFileDialog, QWidget, QMessageBox,
-    QScrollArea, QSlider, QSpinBox, QCheckBox
+    QScrollArea, QSlider, QSpinBox, QCheckBox, QSizePolicy
 )
 from PySide6.QtCore import Qt, Signal, QEvent
 from PySide6.QtGui import QPixmap, QKeyEvent, QWheelEvent
@@ -35,10 +35,7 @@ class ZoomableImageLabel(QLabel):
         self.original_pixmap = None
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setStyleSheet("background-color: #2b2b2b;")
-        self.setSizePolicy(
-            QWidget().sizePolicy().Policy.Expanding,
-            QWidget().sizePolicy().Policy.Expanding
-        )
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def set_image(self, pixmap: QPixmap):
         """Establece la imagen original"""
