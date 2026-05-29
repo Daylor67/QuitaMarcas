@@ -56,3 +56,11 @@ class WmPersistenceService:
     def set_conf_threshold(self, value: int) -> None:
         """Persiste el umbral de confianza YOLO (1-100)."""
         UtilJson(self._path).set('conf_threshold', max(1, min(100, int(value))))
+
+    def get_save_yolo_data(self) -> bool:
+        """Retorna si se deben recopilar datos de entrenamiento YOLO. Default: True."""
+        return bool(UtilJson(self._path).get('save_yolo_data', True))
+
+    def set_save_yolo_data(self, value: bool) -> None:
+        """Persiste la preferencia de recopilar datos de entrenamiento YOLO."""
+        UtilJson(self._path).set('save_yolo_data', bool(value))

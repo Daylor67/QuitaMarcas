@@ -77,9 +77,32 @@ class TrainingDataCollector(QWidget):
         conteo_layout.addWidget(self.training_counts_label)
 
         main_layout.addWidget(conteo_group)
+        self._conteo_group = conteo_group
+
+        # Visibilidad segun la preferencia de recopilacion (checkbox save_yolo_data).
+        # Si el usuario togglea el checkbox mientras el dialogo esta abierto, refleja en vivo.
+        if self.watermark_tab is not None and hasattr(self.watermark_tab, 'save_yolo_data'):
+            self.watermark_tab.save_yolo_data.toggled.connect(self._apply_collection_visibility)
+        self._apply_collection_visibility()
 
         # Refresco inicial (replica linea 493 del original)
         self._update_counts_label()
+
+    def _is_collection_enabled(self) -> bool:
+        """True si el usuario quiere recopilar datos de entrenamiento.
+
+        Fuente de verdad: el checkbox `save_yolo_data` del WatermarkTab si esta
+        disponible; si no (p.ej. pruebas standalone), cae a la preferencia
+        persistida en wm_settings.json.
+        """
+        if self.watermark_tab is not None and hasattr(self.watermark_tab, 'save_yolo_data'):
+            return self.watermark_tab.save_yolo_data.isChecked()
+        from WatermarkRemove.services import wm_persistence
+        return wm_persistence.get_save_yolo_data()
+
+    def _apply_collection_visibility(self):
+        """Oculta el grupo de conteo cuando la recopilacion esta deshabilitada."""
+        self._conteo_group.setVisible(self._is_collection_enabled())
 
     # ===================================================================
     # Logging (replica patron 141-149 del slideshow_viewer.py original)
@@ -149,6 +172,8 @@ class TrainingDataCollector(QWidget):
         line 1842) NO se guarda nada — el collector ignora la muestra.
         """
         try:
+            if not self._is_collection_enabled():
+                return
             if watermark_path is None:
                 return
             save_training_sample(

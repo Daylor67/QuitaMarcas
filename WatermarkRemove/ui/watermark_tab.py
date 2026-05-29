@@ -18,7 +18,7 @@ if parent_dir not in sys.path:
 
 from .image_viewer import ImageViewer
 from .position_editor import PositionEditor
-from WatermarkRemove.services import context_menu_service
+from WatermarkRemove.services import context_menu_service, wm_persistence
 
 
 class WatermarkTab(QWidget):
@@ -49,6 +49,12 @@ class WatermarkTab(QWidget):
         # CheckBox: Ejecutar Quita Marcas
         self.run_quita_marcas = QCheckBox("Ejecutar Quita Marcas")
         settings_layout.addWidget(self.run_quita_marcas)
+
+        self.save_yolo_data = QCheckBox("Guardar datos de detección")
+        # Estado persistido entre reinicios (default: True).
+        self.save_yolo_data.setChecked(wm_persistence.get_save_yolo_data())
+        self.save_yolo_data.toggled.connect(wm_persistence.set_save_yolo_data)
+        settings_layout.addWidget(self.save_yolo_data)
 
         # Botón para abrir visor de imágenes
         self.view_images_btn = QPushButton("Ver Imágenes de Input")
