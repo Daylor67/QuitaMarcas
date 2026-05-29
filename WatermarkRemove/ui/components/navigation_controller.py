@@ -232,8 +232,10 @@ class NavigationController(QWidget):
         nav_layout.setContentsMargins(8, 6, 8, 6)
 
         # Reparentar widgets ya existentes (creados en _setup_ui)
-        nav_layout.addWidget(self.counter_label)
-        nav_layout.addWidget(self.filename_label)
+        info_layout = QHBoxLayout()
+        info_layout.addWidget(self.counter_label, 0)
+        info_layout.addWidget(self.filename_label, 1)
+        nav_layout.addLayout(info_layout)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(5)
