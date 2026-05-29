@@ -468,9 +468,13 @@ class WatermarkProcessor(QWidget):
 
         auto_layout.addWidget(QLabel("Marcas detectadas:"))
         self.detections_list = QListWidget()
-        self.detections_list.setMaximumHeight(50)
+        self.detections_list.setStyleSheet(
+            "background:#1e2a3a; color:#ddeeff"
+        )
         self.detections_list.currentRowChanged.connect(self._on_detection_selected)
         auto_layout.addWidget(self.detections_list)
+        
+        auto_layout.addStretch(1)
 
         auto_layout.addWidget(QLabel("Posición de marca seleccionada:"))
         auto_xy_container = QWidget()
@@ -519,7 +523,6 @@ class WatermarkProcessor(QWidget):
 
         auto_layout.addLayout(file1)
         auto_layout.addLayout(auto_btns)
-        auto_layout.addStretch(1)
 
         self.auto_group.hide()
         outer.addWidget(self.auto_group)
