@@ -1,6 +1,4 @@
 # Cambios
 
-## Detección automatica de marcas de agua
-- Implementacion para la deteccion de marcas de agua
-- Actual mente solo funciona con las pequeña de color y gris
-- Se recopilan datos cuando se remueva una marca banner para poder mejor las deteccion de estas
+- **Lavado de cara** - Mejoras visual en la interfaz
+- **Deteccion automatica** - Ahora puede detectar las marcas "banners"
