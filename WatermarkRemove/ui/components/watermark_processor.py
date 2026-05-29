@@ -73,6 +73,62 @@ class _FlushSignals(QObject):
     failed = Signal(object, str)              # (Path file, str error_msg)
 
 
+class _AutoFlushWorker(QRunnable):
+    """Worker que corre en QThreadPool: aplica remove_watermark a las marcas
+    YOLO detectadas (que ya tienen array y posición en memoria).
+
+    Se snapshotea todo el estado en el hilo principal antes de lanzar; el
+    worker no toca widgets ni state mutable del processor.
+    """
+
+    def __init__(self, current_file, base_image, marks_data,
+                 wm_folder_name, output_folder):
+        """
+        marks_data: list[{'watermark_array', 'watermark_path', 'x', 'y'}]
+        """
+        super().__init__()
+        self.signals = _FlushSignals()
+        self._current_file = current_file
+        self._base_image = base_image
+        self._marks_data = marks_data
+        self._wm_folder_name = wm_folder_name
+        self._output_folder = output_folder
+
+    def run(self):
+        try:
+            result = self._base_image.copy()
+            training_entries = []
+
+            for mark in self._marks_data:
+                try:
+                    base_before = result
+                    result = remove_watermark(
+                        result,
+                        mark['watermark_array'],
+                        mark['x'], mark['y'],
+                        alpha_adjust=1.0,
+                        apply_jpeg_filter=True,
+                    )
+                    training_entries.append((
+                        self._current_file, result, mark['x'], mark['y'],
+                        mark['watermark_array'], mark['watermark_path'],
+                        self._wm_folder_name,
+                        base_before,
+                    ))
+                except Exception:
+                    pass
+
+            if not training_entries:
+                self.signals.failed.emit(self._current_file, "Sin marcas aplicables")
+                return
+
+            guardar(self._current_file, result, self._output_folder)
+            self.signals.completed.emit(self._current_file, result, training_entries)
+
+        except Exception as e:
+            self.signals.failed.emit(self._current_file, str(e))
+
+
 class _WatermarkFlushWorker(QRunnable):
     """Worker que corre en QThreadPool: load → align → remove → guardar.
 
@@ -1067,8 +1123,14 @@ class WatermarkProcessor(QWidget):
         worker.signals.failed.connect(self._on_flush_failed)
         QThreadPool.globalInstance().start(worker)
 
-    def _on_flush_completed(self, current_file, _result_image, training_entries):
-        """Slot (hilo principal): el worker terminó — emitir training data y log."""
+    def _on_flush_completed(self, current_file, result_image, training_entries):
+        """Slot (hilo principal): el worker terminó — emitir training data y log.
+
+        Si seguimos en la misma imagen (caso "Guardar" sin avance), actualizar
+        el cache local _working_image para que el siguiente cómputo lo vea.
+        """
+        if self._current_file == current_file:
+            self._working_image = result_image
         for entry in training_entries:
             self.image_processed.emit(*entry)
         self.counts_changed.emit()
@@ -1618,64 +1680,61 @@ class WatermarkProcessor(QWidget):
         self.preview_changed.emit(self.auto_preview_image)
 
     def _accept_auto_detections(self):
-        """Aplica remove_watermark a todas las marcas y guarda. Tambien emite training data."""
+        """Lanza un _AutoFlushWorker en el QThreadPool global.
+
+        Snapshotea las marcas YOLO y el working_image en el hilo principal,
+        delega la batch de remove_watermark al thread pool. La UI se libera
+        inmediatamente (caso "Guardar y Siguiente": navigation.request_next
+        avanza sin esperar al worker).
+        """
         if not self.detected_marks:
             self._log("⚠️ Sin detecciones para aplicar")
             return
         if self._working_image is None:
             return
+
+        # Filtrar marcas con watermark_array válido — snapshot sin tocar
+        # self.detected_marks (que se limpia abajo, pero el worker ya tiene su copia).
+        marks_data = [
+            {
+                'watermark_array': m['watermark_array'],
+                'watermark_path':  m['watermark_path'],
+                'x': m['x'],
+                'y': m['y'],
+            }
+            for m in self.detected_marks
+            if m['watermark_array'] is not None
+        ]
+        if not marks_data:
+            self._log("⚠️ Sin marcas removibles (todas sin PNG)")
+            return
+
         if self._output_folder is None:
             self.output_folder_request.emit()
+            if self._output_folder is None:
+                return
 
         current_file = self._current_file
         if current_file is None:
             return
-        base = self._working_image
-        result = base.copy()
-        applied = 0
-        last_emitted = None
 
-        for mark in self.detected_marks:
-            if mark['watermark_array'] is None:
-                continue
-            result = remove_watermark(
-                result,
-                mark['watermark_array'],
-                mark['x'],
-                mark['y'],
-                alpha_adjust=1.0,
-                apply_jpeg_filter=True,
-            )
+        worker = _AutoFlushWorker(
+            current_file=current_file,
+            base_image=self._working_image,
+            marks_data=marks_data,
+            wm_folder_name=self.watermark_folder.name if self.watermark_folder else '',
+            output_folder=self._output_folder,
+        )
+        worker.signals.completed.connect(self._on_flush_completed)
+        worker.signals.failed.connect(self._on_flush_failed)
+        QThreadPool.globalInstance().start(worker)
 
-            # Emit image_processed para que el collector guarde training data por cada mark
-            last_emitted = (
-                current_file,
-                result,
-                mark['x'],
-                mark['y'],
-                mark['watermark_array'],
-                mark['watermark_path'],
-                self.watermark_folder.name if self.watermark_folder else '',
-                base,
-            )
-            self.image_processed.emit(*last_emitted)
-
-            applied += 1
-
-        if applied == 0:
-            self._log("⚠️ Sin marcas removibles (todas sin PNG)")
-            return
-
-        self._working_image = result
-        if self._output_folder is not None:
-            guardar(current_file, result, self._output_folder)
-        self.counts_changed.emit()
-        self._log(f"✅ {applied} marca(s) removida(s) en {current_file.name}")
-
+        # Limpiar state local inmediatamente para que la UI responda
         self.detected_marks = []
         self.selected_mark_index = -1
         self.auto_preview_image = None
         self.detections_list.clear()
+        self.preview_changed.emit(None)
         self.request_redraw.emit()
 
     def _accept_auto_detections_and_next(self):
