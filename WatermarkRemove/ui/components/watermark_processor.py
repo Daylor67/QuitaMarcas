@@ -44,7 +44,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QSpinBox, QDoubleSpinBox, QListWidget, QListWidgetItem, QGroupBox,
     QMessageBox,
 )
-from PySide6.QtCore import Qt, Signal, QEvent, QPoint, QRect, QRunnable, QThreadPool, QObject
+from PySide6.QtCore import Qt, Signal, QEvent, QPoint, QRect, QRunnable, QThreadPool, QObject, QTimer
 from PySide6.QtGui import QPainter, QPen, QColor, QPixmap, QMouseEvent
 
 import numpy as np
@@ -456,6 +456,26 @@ class WatermarkProcessor(QWidget):
         self.auto_group = QGroupBox("🤖 Detección automática")
         auto_layout = QVBoxLayout(self.auto_group)
         auto_layout.setSpacing(5)
+
+        # Umbral de confianza del modelo
+        conf_container = QWidget()
+        conf_layout = QHBoxLayout(conf_container)
+        conf_layout.setContentsMargins(0, 0, 0, 0)
+        conf_layout.setSpacing(6)
+        conf_layout.addWidget(QLabel("Sensibilidad:"), 0)
+        self.conf_spinbox = QSpinBox()
+        self.conf_spinbox.setRange(1, 100)
+        self.conf_spinbox.setSuffix(" %")
+        self.conf_spinbox.setValue(wm_persistence.get_conf_threshold())
+        self.conf_spinbox.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        conf_layout.addWidget(self.conf_spinbox, 1)
+        auto_layout.addWidget(conf_container)
+
+        self._conf_debounce = QTimer(self)
+        self._conf_debounce.setSingleShot(True)
+        self._conf_debounce.timeout.connect(self._run_auto_detection)
+        self.conf_spinbox.valueChanged.connect(wm_persistence.set_conf_threshold)
+        self.conf_spinbox.valueChanged.connect(lambda: self._conf_debounce.start(400))
 
         self.auto_quick_preview_checkbox = QCheckBox("Preview rápida (cancelación)")
         self.auto_quick_preview_checkbox.setChecked(True)

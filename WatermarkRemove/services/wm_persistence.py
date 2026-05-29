@@ -47,3 +47,12 @@ class WmPersistenceService:
     def set_splitter_sizes(self, sizes: list) -> None:
         """Persiste los tamaños del splitter en wm_settings.json."""
         UtilJson(self._path).set('splitter_sizes', [int(v) for v in sizes])
+
+    def get_conf_threshold(self) -> int:
+        """Retorna el umbral de confianza YOLO guardado (1-100). Default: 90."""
+        value = UtilJson(self._path).get('conf_threshold', 90)
+        return max(1, min(100, int(value)))
+
+    def set_conf_threshold(self, value: int) -> None:
+        """Persiste el umbral de confianza YOLO (1-100)."""
+        UtilJson(self._path).set('conf_threshold', max(1, min(100, int(value))))
