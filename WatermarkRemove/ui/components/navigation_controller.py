@@ -531,11 +531,23 @@ class NavigationController(QWidget):
         self._apply_zoom()
 
     def on_image_processed(self, file, working_image, *args):
-        """Plan 02 wiring: tras accept del processor, actualizar working_image."""
-        self.working_image = working_image
-        self.processed_images.add(self.current_index)
-        self._preview_image_from_processor = None
-        self._apply_zoom()
+        """Plan 02 wiring: tras accept del processor, actualizar working_image.
+
+        El procesamiento de overlays es async — el usuario puede haber avanzado
+        varias imágenes antes de que llegue este callback. Buscar el índice por
+        path en vez de usar current_index para marcar processed_images correctamente.
+        """
+        try:
+            file_index = self.image_files.index(file)
+        except ValueError:
+            file_index = self.current_index
+
+        self.processed_images.add(file_index)
+
+        if file_index == self.current_index:
+            self.working_image = working_image
+            self._preview_image_from_processor = None
+            self._apply_zoom()
 
     def reset_current_image(self):
         """Slot: el processor emitio image_reset (o request_image_reload).

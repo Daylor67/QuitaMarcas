@@ -44,7 +44,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QSpinBox, QDoubleSpinBox, QListWidget, QListWidgetItem, QGroupBox,
     QMessageBox,
 )
-from PySide6.QtCore import Qt, Signal, QEvent, QPoint, QRect
+from PySide6.QtCore import Qt, Signal, QEvent, QPoint, QRect, QRunnable, QThreadPool, QObject
 from PySide6.QtGui import QPainter, QPen, QColor, QPixmap, QMouseEvent
 
 import numpy as np
@@ -65,6 +65,90 @@ from WatermarkRemove.services import wm_persistence
 from WatermarkRemove import align_watermark, remove_watermark
 from WatermarkRemove.wm_remove import load_images_cv2, guardar, find_wm, quick_align_preview
 from WatermarkRemove.yolo.auto_detector import detect_watermarks, resolve_png_for_class
+
+
+class _FlushSignals(QObject):
+    """Señales para el worker de remoción asíncrona (QRunnable no es QObject)."""
+    completed = Signal(object, object, list)  # (Path file, np.ndarray result, list training_entries)
+    failed = Signal(object, str)              # (Path file, str error_msg)
+
+
+class _WatermarkFlushWorker(QRunnable):
+    """Worker que corre en QThreadPool: load → align → remove → guardar.
+
+    Todos los datos necesarios se pasan en el constructor (snapshotados en el hilo
+    principal antes de lanzar). El hilo de Qt no toca ningún widget.
+    """
+
+    def __init__(self, current_file, watermark_file, wm_folder_name,
+                 positions_data, alpha, output_folder):
+        """
+        positions_data: {pos_name: {offset_x, offset_y, side_x, side_y}}
+                        — sin QRect, sólo los campos numéricos/str que necesita
+                          align_watermark.
+        """
+        super().__init__()
+        self.signals = _FlushSignals()
+        self._current_file = current_file
+        self._watermark_file = watermark_file
+        self._wm_folder_name = wm_folder_name
+        self._positions_data = positions_data
+        self._alpha = alpha
+        self._output_folder = output_folder
+
+    def run(self):
+        try:
+            watermark = load_images_cv2(self._watermark_file)
+            if watermark is None:
+                self.signals.failed.emit(
+                    self._current_file,
+                    f"No se pudo cargar marca: {self._watermark_file.name}",
+                )
+                return
+
+            original = load_images_cv2(self._current_file)
+            if original is None:
+                self.signals.failed.emit(
+                    self._current_file,
+                    f"No se pudo cargar imagen: {self._current_file.name}",
+                )
+                return
+
+            result = original
+            training_entries = []
+
+            for pos_name, pd in self._positions_data.items():
+                try:
+                    base_before = result
+                    x, y = align_watermark(
+                        result, watermark,
+                        offset_x=pd['offset_x'],
+                        offset_y=pd['offset_y'],
+                        side_x=pd['side_x'],
+                        side_y=pd['side_y'],
+                    )
+                    result = remove_watermark(
+                        result, watermark, x, y,
+                        alpha_adjust=self._alpha,
+                    )
+                    training_entries.append((
+                        self._current_file, result, x, y,
+                        watermark, self._watermark_file,
+                        self._wm_folder_name,
+                        base_before,
+                    ))
+                except Exception:
+                    pass
+
+            if not training_entries:
+                self.signals.failed.emit(self._current_file, "Sin marcas aplicadas")
+                return
+
+            guardar(self._current_file, result, self._output_folder)
+            self.signals.completed.emit(self._current_file, result, training_entries)
+
+        except Exception as e:
+            self.signals.failed.emit(self._current_file, str(e))
 
 
 class WatermarkProcessor(QWidget):
@@ -935,15 +1019,11 @@ class WatermarkProcessor(QWidget):
             self.auto_advance_requested.emit()
 
     def _flush_pending_removals_for_current_image(self):
-        """Aplica en batch todas las posiciones marcadas para la imagen actual.
+        """Lanza un _WatermarkFlushWorker en el QThreadPool global.
 
-        Conectado a `navigation.pre_advance_flush` — se ejecuta al inicio de
-        `request_next`. Carga la imagen original, aplica `remove_watermark` por
-        cada posición en el set, guarda en output_folder y emite `image_processed`
-        por cada posición (collector guarda training data por mark).
-
-        Idempotente: si el usuario vuelve a una imagen ya procesada y vuelve a
-        avanzar, re-aplicar desde la fuente da el mismo resultado.
+        Snapshotea todo el estado de UI necesario en el hilo principal y
+        delega el I/O pesado (load → align → remove → guardar) al worker.
+        request_next retorna inmediatamente — la UI no se congela.
         """
         if self._current_file is None:
             return
@@ -952,68 +1032,50 @@ class WatermarkProcessor(QWidget):
         if not positions:
             return
 
+        # Snapshot rect_data — sólo campos primitivos, sin QRect
+        positions_data = {}
+        for pos_name in positions:
+            rd = self.watermark_rectangles.get(pos_name)
+            if rd is not None:
+                positions_data[pos_name] = {
+                    'offset_x': rd['offset_x'],
+                    'offset_y': rd['offset_y'],
+                    'side_x':   rd['side_x'],
+                    'side_y':   rd['side_y'],
+                }
+        if not positions_data:
+            return
+
         if self._output_folder is None:
             self.output_folder_request.emit()
             if self._output_folder is None:
                 return
 
-        current_watermark_index = self.watermark_combo.currentIndex()
-        if current_watermark_index < 0 or not self.watermark_files:
+        current_wm_index = self.watermark_combo.currentIndex()
+        if current_wm_index < 0 or not self.watermark_files:
             return
 
-        watermark_file = self.watermark_files[current_watermark_index]
-        watermark = load_images_cv2(watermark_file)
-        if watermark is None:
-            self._log(f"❌ Error cargando marca: {watermark_file.name}")
-            return
+        worker = _WatermarkFlushWorker(
+            current_file=self._current_file,
+            watermark_file=self.watermark_files[current_wm_index],
+            wm_folder_name=self.watermark_folder.name if self.watermark_folder else '',
+            positions_data=positions_data,
+            alpha=self.alpha_adjust.value(),
+            output_folder=self._output_folder,
+        )
+        worker.signals.completed.connect(self._on_flush_completed)
+        worker.signals.failed.connect(self._on_flush_failed)
+        QThreadPool.globalInstance().start(worker)
 
-        current_file = self._current_file
-        original = load_images_cv2(current_file)
-        if original is None:
-            self._log(f"❌ Error cargando imagen: {current_file.name}")
-            return
-
-        result = original
-        applied = 0
-        for pos_name in positions:
-            rect_data = self.watermark_rectangles.get(pos_name)
-            if rect_data is None:
-                continue
-            try:
-                base_before = result
-                x, y = align_watermark(
-                    result, watermark,
-                    offset_x=rect_data['offset_x'],
-                    offset_y=rect_data['offset_y'],
-                    side_x=rect_data['side_x'],
-                    side_y=rect_data['side_y'],
-                )
-                result = remove_watermark(
-                    result, watermark, x, y,
-                    alpha_adjust=self.alpha_adjust.value(),
-                )
-                self.image_processed.emit(
-                    current_file, result, x, y,
-                    watermark, watermark_file,
-                    self.watermark_folder.name if self.watermark_folder else '',
-                    base_before,
-                )
-                applied += 1
-            except Exception as e:
-                self._log(f"⚠️ Error aplicando {pos_name}: {e}")
-
-        if applied == 0:
-            return
-
-        try:
-            guardar(current_file, result, self._output_folder)
-        except Exception as e:
-            self._log(f"❌ Error guardando: {e}")
-            return
-
-        self._working_image = result
+    def _on_flush_completed(self, current_file, _result_image, training_entries):
+        """Slot (hilo principal): el worker terminó — emitir training data y log."""
+        for entry in training_entries:
+            self.image_processed.emit(*entry)
         self.counts_changed.emit()
-        self._log(f"✅ {applied} marca(s) removida(s) en {current_file.name}")
+        self._log(f"✅ {len(training_entries)} marca(s) removida(s) en {current_file.name}")
+
+    def _on_flush_failed(self, current_file, error_msg):
+        self._log(f"❌ Flush async ({current_file.name}): {error_msg}")
 
     # ===================================================================
     # Modo manual (preview en vivo + accept/revert con maquina de eventos atomicos)
