@@ -1219,13 +1219,18 @@ class WatermarkProcessor(QWidget):
 
             wm_height, wm_width = watermark_cv.shape[:2]
 
-            # `pos` viene en coordenadas de imagen (sin escala) — navigation ya divio.
-            # Para el overlay sobre scroll_area, necesitamos coords con escala.
-            # Sin embargo, navigation expone esa conversion via signal geometry.
-            # Aqui nos limitamos a guardar mouse_position y emitir geometry.
-            # El navigation eventFilter ya emitio coords sin escala, asi que pos es
-            # la coordenada de imagen real.
-            self.mouse_position = QPoint(pos.x(), pos.y())
+            # Clampear por top-left: la marca completa siempre queda dentro de la imagen.
+            # Clampar el centro con wm//2 deja 1px de overflow en anchos impares; clampar
+            # el top-left evita eso y garantiza que find_wm no reciba coords fuera de rango.
+            if self._working_image is not None:
+                img_h, img_w = self._working_image.shape[:2]
+                top_x = max(0, min(pos.x() - wm_width // 2, max(0, img_w - wm_width)))
+                top_y = max(0, min(pos.y() - wm_height // 2, max(0, img_h - wm_height)))
+                cx = top_x + wm_width // 2
+                cy = top_y + wm_height // 2
+            else:
+                cx, cy = pos.x(), pos.y()
+            self.mouse_position = QPoint(cx, cy)
 
             # Para el overlay visible: necesitamos las coords con escala que vienen
             # del scroll area. Como navigation conoce su zoom_level, le pedimos a navigation
@@ -1243,7 +1248,7 @@ class WatermarkProcessor(QWidget):
             # Por simplicidad, hacemos que navigation calcule el geometry en su slot:
             # le pasamos (image_x, image_y, wm_width, wm_height) y navigation aplica
             # su zoom_level / 100.0 internamente al recibir.
-            self.manual_overlay_geometry.emit(int(pos.x()), int(pos.y()), int(wm_width), int(wm_height))
+            self.manual_overlay_geometry.emit(cx, cy, int(wm_width), int(wm_height))
 
         except Exception as e:
             self._log(f"⚠️ Error actualizando overlay: {e}")
@@ -1563,7 +1568,7 @@ class WatermarkProcessor(QWidget):
         if self._working_image is None:
             return
         try:
-            detections = detect_watermarks(self._working_image)
+            detections = detect_watermarks(self._working_image, conf_threshold=self.conf_spinbox.value() / 100.0)
         except FileNotFoundError as e:
             self._log(f"❌ {e}")
             QMessageBox.warning(self, "Modelo no encontrado", str(e))
